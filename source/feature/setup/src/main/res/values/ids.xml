@@ -11,6 +11,18 @@
     <item name="required" type="string" />
     <item name="root_permission" type="string" />
     <item name="root_permission_desc" type="string" />
+    <item name="adb_permission" type="string" />
+    <item name="adb_permission_desc" type="string" />
+    <item name="adb_setup_title" type="string" />
+    <item name="adb_setup_desc" type="string" />
+    <item name="adb_pair_port" type="string" />
+    <item name="adb_pair_port_label" type="string" />
+    <item name="adb_pair_code" type="string" />
+    <item name="adb_pair_code_label" type="string" />
+    <item name="adb_pair_failed" type="string" />
+    <item name="adb_legacy_title" type="string" />
+    <item name="adb_legacy_desc" type="string" />
+    <item name="adb_legacy_failed" type="string" />
     <item name="abi_validation" type="string" />
     <item name="abi_validation_desc" type="string" />
     <item name="optional" type="string" />

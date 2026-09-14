@@ -8,37 +8,48 @@ import com.xayah.core.util.model.ShellResult
 object Tar {
     private suspend fun execute(vararg args: String): ShellResult = BaseUtil.execute("tar", *args)
 
+    /**
+     * Mengompresi isi direktori [cur] tanpa berpindah direktori permanen.
+     *
+     * `cd` dibuat satu perintah dengan `tar`, bukan perintah terpisah: backend
+     * shell (Shizuku/ADB) menjalankan tiap perintah sebagai proses sendiri,
+     * sehingga `cd` terpisah tidak berpengaruh ke perintah berikutnya. Pola
+     * lama hanya bekerja lewat sesi libsu yang persisten.
+     */
     suspend fun compressInCur(cur: String, src: String, dst: String, extra: String): ShellResult {
-        // Move to $cur path.
-        BaseUtil.execute("cd", cur)
-
-        // Compress
-        val result = if (extra.isEmpty()) {
-            // tar --totals -cpf - $src > "$dst"
-            execute(
+        val quotedCur = "${SymbolUtil.QUOTE}$cur${SymbolUtil.QUOTE}"
+        val quotedDst = "${SymbolUtil.QUOTE}$dst${SymbolUtil.QUOTE}"
+        return if (extra.isEmpty()) {
+            // cd "$cur" && tar --totals -cpf - $src > "$dst"
+            BaseUtil.execute(
+                "cd",
+                quotedCur,
+                "&&",
+                "tar",
                 "--totals",
                 "-cpf",
-                "- $src",
+                "-",
+                src,
                 ">",
-                "${SymbolUtil.QUOTE}$dst${SymbolUtil.QUOTE}",
+                quotedDst,
             )
         } else {
-            // tar --totals -cpf - $src | $extra > "$dst"
-            execute(
+            // cd "$cur" && tar --totals -cpf - $src | $extra > "$dst"
+            BaseUtil.execute(
+                "cd",
+                quotedCur,
+                "&&",
+                "tar",
                 "--totals",
                 "-cpf",
-                "- $src",
+                "-",
+                src,
                 "|",
                 extra,
                 ">",
-                "${SymbolUtil.QUOTE}$dst${SymbolUtil.QUOTE}",
+                quotedDst,
             )
         }
-
-        // Move back
-        BaseUtil.execute("cd", "/")
-
-        return result
     }
 
     suspend fun compress(exclusionList: List<String>, h: String, srcDir: String, src: String, dst: String, extra: String): ShellResult =

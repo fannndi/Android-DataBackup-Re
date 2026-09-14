@@ -37,7 +37,7 @@ const val CloudTmpRelativeDir = "DataBackupTmpDir"
  * terjangkau shell lewat grup `ext_data_rw`.
  */
 fun Context.appWorkDir(): String =
-    if (BaseUtil.isShizukuMode()) {
+    if (BaseUtil.isShellMode()) {
         getExternalFilesDir(null)?.absolutePath ?: filesDir()
     } else {
         filesDir()
@@ -94,7 +94,7 @@ class PathUtil @Inject constructor(
          * Karena itu jalur harus mengikuti mode eksekusi yang sedang aktif.
          */
         private fun androidExternalRoot(userId: Int): String =
-            if (BaseUtil.isShizukuMode()) {
+            if (BaseUtil.isShellMode()) {
                 "${ConstantUtil.STORAGE_EMULATED_PATH}/${userId}/Android"
             } else {
                 "${getDataMediaDir()}/${userId}/Android"
@@ -124,7 +124,7 @@ class PathUtil @Inject constructor(
          * ada yang perlu disesuaikan.
          */
         suspend fun setFilesDirSELinux(context: Context) {
-            if (BaseUtil.isShizukuMode()) return
+            if (BaseUtil.isShellMode()) return
 
             SELinux.getContext(path = context.filesDir()).also { result ->
                 val pathContext = if (result.isSuccess) result.outString else ""

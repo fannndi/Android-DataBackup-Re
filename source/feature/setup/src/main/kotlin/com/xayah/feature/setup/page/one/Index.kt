@@ -1,5 +1,6 @@
 package com.xayah.feature.setup.page.one
 
+import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
@@ -27,12 +28,14 @@ import com.xayah.core.ui.component.HeadlineMediumText
 import com.xayah.core.ui.component.LocalSlotScope
 import com.xayah.core.ui.component.Section
 import com.xayah.core.ui.component.SetOnResume
+import com.xayah.core.ui.component.confirm
 import com.xayah.core.ui.component.edit
 import com.xayah.core.ui.component.paddingTop
 import com.xayah.core.ui.theme.ThemedColorSchemeKeyTokens
 import com.xayah.core.ui.theme.value
 import com.xayah.core.ui.token.SizeTokens
 import com.xayah.core.ui.util.LocalNavController
+import com.xayah.core.util.command.AdbShell
 import com.xayah.core.util.navigateSingle
 import com.xayah.feature.setup.PermissionButton
 import com.xayah.feature.setup.R
@@ -49,6 +52,7 @@ fun PageOne() {
     val viewModel = hiltViewModel<IndexViewModel>()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val rootState by viewModel.rootState.collectAsStateWithLifecycle()
+    val adbState by viewModel.adbState.collectAsStateWithLifecycle()
     val abiState by viewModel.abiState.collectAsStateWithLifecycle()
     val notificationState by viewModel.notificationState.collectAsStateWithLifecycle()
     val allRequiredValidated by viewModel.allRequiredValidated.collectAsStateWithLifecycle()
@@ -117,6 +121,59 @@ fun PageOne() {
                 ) {
                     viewModel.launchOnIO {
                         viewModel.emitIntent(IndexUiIntent.ValidateRoot)
+                    }
+                }
+                PermissionButton(
+                    title = stringResource(id = R.string.adb_permission),
+                    desc = stringResource(id = R.string.adb_permission_desc),
+                    envState = adbState,
+                ) {
+                    viewModel.launchOnIO {
+                        // Kunci yang tersimpan sering masih sah; coba dulu tanpa
+                        // mengganggu pengguna.
+                        if (viewModel.tryInitializeAdb()) return@launchOnIO
+
+                        // Wireless debugging baru ada di Android 11. Di Android 10
+                        // jalurnya ADB klasik: adbd dibuka ke TCP lewat USB, lalu
+                        // kunci aplikasi diizinkan lewat dialog di layar HP.
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                            val proceed = dialogState.confirm(
+                                title = context.getString(R.string.adb_legacy_title),
+                                text = context.getString(R.string.adb_legacy_desc),
+                            )
+                            if (proceed.not()) return@launchOnIO
+                            val ready = viewModel.tryInitializeAdb()
+                            if (ready.not()) {
+                                dialogState.confirm(
+                                    title = context.getString(R.string.adb_legacy_title),
+                                    text = context.getString(R.string.adb_legacy_failed),
+                                )
+                            }
+                            return@launchOnIO
+                        }
+
+                        val proceed = dialogState.confirm(
+                            title = context.getString(R.string.adb_setup_title),
+                            text = context.getString(R.string.adb_setup_desc),
+                        )
+                        if (proceed.not()) return@launchOnIO
+
+                        val discoveredPort = AdbShell.discoverPairingPort()
+                        val (portDismiss, portText) = dialogState.edit(
+                            title = context.getString(R.string.adb_pair_port),
+                            defValue = if (discoveredPort > 0) discoveredPort.toString() else "",
+                            label = context.getString(R.string.adb_pair_port_label),
+                        )
+                        if (portDismiss.isConfirm.not()) return@launchOnIO
+                        val port = portText.trim().toIntOrNull() ?: return@launchOnIO
+
+                        val (codeDismiss, code) = dialogState.edit(
+                            title = context.getString(R.string.adb_pair_code),
+                            label = context.getString(R.string.adb_pair_code_label),
+                        )
+                        if (codeDismiss.isConfirm.not()) return@launchOnIO
+
+                        viewModel.pairAdb(port = port, pairingCode = code.trim())
                     }
                 }
                 PermissionButton(

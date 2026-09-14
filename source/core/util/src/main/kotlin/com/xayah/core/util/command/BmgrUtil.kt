@@ -43,8 +43,6 @@ object Bmgr {
     /** Transport device-to-device: dipakai saat migrasi antar perangkat. */
     const val TRANSPORT_D2D = "com.google.android.gms/.backup.migrate.service.D2dTransport"
 
-    private const val SUCCESS_MARKER = "with result: Success"
-
     private suspend fun execute(vararg args: String): ShellResult = BaseUtil.execute(*args)
 
     /**
@@ -81,13 +79,23 @@ object Bmgr {
     suspend fun backupNow(packageName: String): BackupOutcome {
         val result = execute("bmgr", "backupnow", packageName)
         val output = result.outString.trim()
-        val success = output.contains(SUCCESS_MARKER)
+        // Harus hasil untuk paket ini. Keluaran bmgr juga memuat pseudo-paket
+        // `@pm@` yang selalu sukses, sehingga pencarian "with result: Success"
+        // biasa bisa menutupi kegagalan paket yang diminta.
+        val success = isBackupSuccess(output = output, packageName = packageName)
         return BackupOutcome(
             success = success,
             token = if (success) restoreToken() else null,
             output = output,
         )
     }
+
+    /**
+     * Dipisah supaya bisa diuji tanpa menjalankan perintah.
+     */
+    internal fun isBackupSuccess(output: String, packageName: String): Boolean =
+        Regex("""Package\s+${Regex.escape(packageName)}\s+with result:\s*Success""")
+            .containsMatchIn(output)
 
     /**
      * `bmgr restore <token> <pkg>` — memulihkan satu paket dari citra backup.

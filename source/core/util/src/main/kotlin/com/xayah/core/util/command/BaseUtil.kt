@@ -55,16 +55,44 @@ private class EnvInitializer : Shell.Initializer() {
 }
 
 object BaseUtil {
+    /** Backend shell yang sedang dipakai. */
+    enum class ShellBackend { SHIZUKU, ADB }
+
     /**
-     * True kalau perintah dijalankan lewat Shizuku (uid 2000) alih-alih `su`.
+     * True kalau perintah dijalankan lewat backend shell (uid 2000) alih-alih
+     * `su` — baik lewat Shizuku maupun klien ADB mandiri.
      *
-     * Diaktifkan oleh [initializeShizukuMode] setelah pengguna memberi izin.
-     * Selama masih false, perilakunya sama seperti sebelumnya: lewat libsu.
+     * Flag ini dipegang di memori, jadi hilang setiap proses mati. Saat
+     * aplikasi dibuka lagi, [expectShellMode] menandainya lebih dulu (berdasarkan
+     * izin Shizuku / kunci ADB yang tersimpan) supaya perintah tidak sempat
+     * jatuh ke jalur root, lalu [ShellModeInitializer] menyiapkan backendnya.
      */
     @Volatile
-    private var shizukuMode = false
+    private var shellMode = false
 
-    fun isShizukuMode(): Boolean = shizukuMode
+    @Volatile
+    private var shellBackend: ShellBackend = ShellBackend.SHIZUKU
+
+    fun isShellMode(): Boolean = shellMode
+
+    /**
+     * Menandai backend shell yang kemungkinan tersedia, sebelum koneksinya
+     * benar-benar siap.
+     *
+     * Tanpa ini, perintah di perangkat tanpa root akan jatuh ke libsu dan
+     * dijalankan sebagai uid aplikasi — berhasil "secara kode" tetapi tidak
+     * punya hak yang dibutuhkan, sehingga kegagalannya sulit dilacak.
+     */
+    fun expectShellMode(context: Context) {
+        if (shellMode) return
+        if (ShizukuShell.hasPermission()) {
+            shellMode = true
+            shellBackend = ShellBackend.SHIZUKU
+        } else if (AdbShell.hasSavedKey(context)) {
+            shellMode = true
+            shellBackend = ShellBackend.ADB
+        }
+    }
 
     /**
      * Mengalihkan eksekusi perintah ke Shizuku.
@@ -77,8 +105,31 @@ object BaseUtil {
     suspend fun initializeShizukuMode(context: Context): Boolean {
         if (ShizukuShell.hasPermission().not()) return false
         val ready = ShizukuShell.stageBinaries(context)
-        shizukuMode = ready
+        if (ready) {
+            shellMode = true
+            shellBackend = ShellBackend.SHIZUKU
+        }
         return ready
+    }
+
+    /**
+     * Mengalihkan eksekusi perintah ke klien ADB mandiri (tanpa Shizuku).
+     *
+     * Pemanggil sudah melakukan pairing lewat [AdbShell.pair]; di sini tinggal
+     * menyambung dan menyinggahkan binary.
+     *
+     * Koneksi yang gagal (mis. Wireless debugging mati) tetap menandai mode
+     * ADB supaya perintah tidak jatuh ke jalur root; [AdbShell.exec] akan
+     * mencoba menyambung lagi pada perintah berikutnya.
+     *
+     * @return true kalau ADB siap dipakai
+     */
+    suspend fun initializeAdbMode(context: Context): Boolean {
+        AdbShell.configure(context)
+        shellMode = true
+        shellBackend = ShellBackend.ADB
+        if (AdbShell.connect().not()) return false
+        return AdbShell.stageBinaries(context)
     }
 
     private suspend fun getShellBuilder(context: Context) = Shell.Builder.create()
@@ -106,12 +157,15 @@ object BaseUtil {
         }
 
         if (shell == null) {
-            if (shizukuMode) {
-                // Tanpa root: perintah dijalankan sebagai uid 2000 lewat Shizuku.
-                ShizukuShell.exec(shellResult.inputString).also { result ->
-                    shellResult.code = result.code
-                    shellResult.out = result.out
+            if (shellMode) {
+                // Tanpa root: perintah dijalankan sebagai uid 2000, lewat
+                // Shizuku atau klien ADB mandiri.
+                val result = when (shellBackend) {
+                    ShellBackend.ADB -> AdbShell.exec(shellResult.inputString)
+                    ShellBackend.SHIZUKU -> ShizukuShell.exec(shellResult.inputString)
                 }
+                shellResult.code = result.code
+                shellResult.out = result.out
             } else {
                 Shell.cmd(shellResult.inputString).exec().also { result ->
                     shellResult.code = result.code
@@ -157,9 +211,9 @@ object BaseUtil {
     }
 
     suspend fun kill(context: Context, vararg keys: String) {
-        if (shizukuMode) {
+        if (isShellMode()) {
             // Tidak ada daemon root untuk dimatikan saat berjalan sebagai shell.
-            log { "kill" to "Dilewati: mode Shizuku tidak punya daemon root." }
+            log { "kill" to "Dilewati: mode shell tidak punya daemon root." }
             return
         }
 
@@ -181,7 +235,7 @@ object BaseUtil {
     }
 
     suspend fun killPackage(context: Context, userId: Int, packageName: String) {
-        if (shizukuMode) {
+        if (isShellMode()) {
             // `pm force-stop` dan `am force-stop` bisa dijalankan sebagai shell.
             // `killall` tetap dicoba; kalau tidak diizinkan, tidak masalah.
             val cmd = """

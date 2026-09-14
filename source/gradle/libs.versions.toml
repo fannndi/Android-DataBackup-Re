@@ -28,6 +28,7 @@ okhttp = "4.12.0"
 retrofit = "2.9.0"
 libsu = "6.0.0"
 shizuku = "13.1.5"
+libadb = "3.1.1"
 work-manager = "2.10.0"
 zip4j = "2.11.5"
 kotlinx-coroutines-core-jvm = "1.8.0"
@@ -108,6 +109,10 @@ libsu-service = { module = "com.github.topjohnwu.libsu:service", version.ref = "
 # `api` membawa serta `aidl` dan `shared` sebagai dependensi transitif.
 shizuku-api = { module = "dev.rikka.shizuku:api", version.ref = "shizuku" }
 shizuku-provider = { module = "dev.rikka.shizuku:provider", version.ref = "shizuku" }
+
+# ADB mandiri (klien ADB dalam aplikasi, tanpa Shizuku)
+libadb-android = { module = "com.github.MuntashirAkon:libadb-android", version.ref = "libadb" }
+bouncycastle-bcpkix = { module = "org.bouncycastle:bcpkix-jdk18on", version.ref = "bountycastle" }
 zip4j = { module = "net.lingala.zip4j:zip4j", version.ref = "zip4j" }
 google-services = { module = "com.google.gms:google-services", version.ref = "google-services" }
 firebase-crashlytics-gradle = { module = "com.google.firebase:firebase-crashlytics-gradle", version.ref = "firebase-crashlytics-gradle" }

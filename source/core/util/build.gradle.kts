@@ -26,6 +26,14 @@ dependencies {
     // Shizuku
     implementation(libs.shizuku.api)
 
+    // ADB mandiri: klien ADB di dalam aplikasi, dipakai saat Shizuku tidak ada.
+    // bcprov-jdk15to18 dibuang supaya tidak bentrok dengan bcprov-jdk18on yang
+    // sudah dipakai aplikasi (bcutil-jdk18on).
+    implementation(libs.libadb.android) {
+        exclude(group = "org.bouncycastle", module = "bcprov-jdk15to18")
+    }
+    implementation(libs.bouncycastle.bcpkix)
+
     // zip4j
     implementation(libs.zip4j)
 

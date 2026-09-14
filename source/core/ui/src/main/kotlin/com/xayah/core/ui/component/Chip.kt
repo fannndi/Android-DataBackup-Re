@@ -500,7 +500,7 @@ fun DataChips(selections: PackageDataStates, displayStats: PackageDataStats? = n
  * bukan pembacaan berkas.
  */
 private fun DataType.isAvailableInCurrentMode(): Boolean =
-    if (BaseUtil.isShizukuMode().not()) {
+    if (BaseUtil.isShellMode().not()) {
         true
     } else {
         this != DataType.PACKAGE_USER && this != DataType.PACKAGE_USER_DE

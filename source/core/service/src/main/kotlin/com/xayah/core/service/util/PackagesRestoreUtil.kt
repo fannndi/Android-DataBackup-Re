@@ -262,6 +262,11 @@ class PackagesRestoreUtil @Inject constructor(
 
         if (p.getDataSelected(dataType).not()) {
             t.updateInfo(dataType = dataType, state = OperationState.SKIP)
+        } else if (BaseUtil.isShellMode() && (dataType == DataType.PACKAGE_USER || dataType == DataType.PACKAGE_USER_DE)) {
+            // Di mode shell arsip data privat memang tidak pernah dibuat
+            // (ditangani `bmgr`), jadi ketiadaannya bukan kegagalan.
+            out.add(log { "Private data is restored via bmgr, skip tar." })
+            t.updateInfo(dataType = dataType, state = OperationState.SKIP, log = out.toLineString())
         } else {
             if (uid == -1) {
                 isSuccess = false
@@ -317,7 +322,7 @@ class PackagesRestoreUtil @Inject constructor(
                     // penyimpanan eksternal dimiliki lewat pemetaan FUSE dan
                     // konteksnya ditetapkan media provider, sehingga aplikasi
                     // tetap bisa membacanya.
-                    if (BaseUtil.isShizukuMode().not()) {
+                    if (BaseUtil.isShellMode().not()) {
                         var gid: UInt = uid.toUInt()
                         if (dataType == DataType.PACKAGE_DATA || dataType == DataType.PACKAGE_OBB || dataType == DataType.PACKAGE_MEDIA) {
                             val (_, pathGid) = rootService.getUidGid(dataType.srcDir(userId))
@@ -440,10 +445,13 @@ class PackagesRestoreUtil @Inject constructor(
      */
     suspend fun restorePrivateBmgr(userId: Int, p: PackageEntity) = run {
         val token = p.extraInfo.bmgrToken
-        if (BaseUtil.isShizukuMode().not() || token.isEmpty()) return@run
+        if (BaseUtil.isShellMode().not() || token.isEmpty()) return@run
 
         val packageName = p.packageName
         log { "Restoring private data via bmgr..." }
+
+        // Sama seperti saat backup: pastikan BackupManager aktif.
+        if (Bmgr.isEnabled().not()) Bmgr.setEnabled(true)
 
         // Kosongkan data lama supaya hasil restore tidak bercampur.
         Pm.clear(userId = userId, packageName = packageName).also { result ->

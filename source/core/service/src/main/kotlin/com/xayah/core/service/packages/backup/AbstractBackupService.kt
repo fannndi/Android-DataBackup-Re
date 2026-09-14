@@ -153,6 +153,13 @@ internal abstract class AbstractBackupService : AbstractPackagesService() {
                 )
                 log { "Current package: ${pkg.packageEntity}" }
 
+                // Data privat lewat BackupManager harus diambil SEBELUM app
+                // di-kill: `am force-stop` membuat paket berstatus "stopped",
+                // dan BackupManagerService menolaknya dengan
+                // "Backup is not allowed". Hasilnya disimpan di extraInfo
+                // sebelum konfigurasi backup ditulis di bawah.
+                mPackagesBackupUtil.backupPrivateBmgr(p = pkg.packageEntity)
+
                 killApp(killAppOption, pkg)
 
                 pkg.update(state = OperationState.PROCESSING)
@@ -169,10 +176,6 @@ internal abstract class AbstractBackupService : AbstractPackagesService() {
                     backup(type = DataType.PACKAGE_MEDIA, p = p, r = restoreEntity, t = pkg, dstDir = dstDir)
                     mPackagesBackupUtil.backupPermissions(p = p)
                     mPackagesBackupUtil.backupSsaid(p = p)
-                    // Data privat lewat BackupManager. Hanya berjalan pada mode
-                    // Shizuku; hasilnya disimpan di extraInfo sebelum konfigurasi
-                    // backup ditulis di bawah.
-                    mPackagesBackupUtil.backupPrivateBmgr(p = p)
 
                     if (pkg.isSuccess) {
                         // Save config

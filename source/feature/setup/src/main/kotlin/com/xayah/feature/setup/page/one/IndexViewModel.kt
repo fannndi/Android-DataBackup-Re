@@ -12,6 +12,7 @@ import com.xayah.core.ui.viewmodel.IndexUiEffect
 import com.xayah.core.ui.viewmodel.UiIntent
 import com.xayah.core.ui.viewmodel.UiState
 import com.xayah.core.util.NotificationUtil
+import com.xayah.core.util.command.AdbShell
 import com.xayah.core.util.command.BaseUtil
 import com.xayah.core.util.command.ShizukuShell
 import com.xayah.core.util.withLog
@@ -155,6 +156,49 @@ class IndexViewModel @Inject constructor(
         }.isSuccess
     }
 
+    // ------------------------------------------------------------------
+    // ADB mandiri
+    //
+    // Jalur ketiga tanpa root: aplikasi bicara protokol ADB langsung ke adbd
+    // lokal lewat Wireless debugging. Pairing cukup sekali; setelah itu kunci
+    // yang tersimpan dipakai lagi.
+    // ------------------------------------------------------------------
+
+    /**
+     * Mencoba menyambung dengan kunci yang sudah ada dan menyinggahkan binary.
+     *
+     * Dipanggil dari layar setup sebelum menawarkan pairing, supaya pengguna
+     * yang sudah pernah pairing cukup menekan tombol sekali.
+     */
+    suspend fun tryInitializeAdb(): Boolean = mutex.withLock {
+        initializeAdbLocked()
+    }
+
+    /**
+     * Pairing dengan kode 6 digit, lalu langsung menyiapkan mode ADB.
+     *
+     * @return true kalau pairing dan penyiapan berhasil
+     */
+    suspend fun pairAdb(port: Int, pairingCode: String): Boolean = mutex.withLock {
+        _adbState.value = EnvState.Processing
+        AdbShell.configure(context)
+        val paired = AdbShell.pair(host = "127.0.0.1", port = port, pairingCode = pairingCode)
+        if (paired) {
+            initializeAdbLocked()
+        } else {
+            _adbState.value = EnvState.Failed
+            false
+        }
+    }
+
+    private suspend fun initializeAdbLocked(): Boolean {
+        _adbState.value = EnvState.Processing
+        AdbShell.configure(context)
+        val ready = BaseUtil.initializeAdbMode(context = context)
+        _adbState.value = if (ready) EnvState.Succeed else EnvState.Failed
+        return ready
+    }
+
     override fun onCleared() {
         if (permissionListenerRegistered) {
             runCatching { Shizuku.removeRequestPermissionResultListener(permissionListener) }
@@ -168,7 +212,15 @@ class IndexViewModel @Inject constructor(
     val abiState: StateFlow<EnvState> = _abiState.stateInScope(EnvState.Idle)
     private val _notificationState: MutableStateFlow<EnvState> = MutableStateFlow(EnvState.Idle)
     val notificationState: StateFlow<EnvState> = _notificationState.stateInScope(EnvState.Idle)
+    private val _adbState: MutableStateFlow<EnvState> = MutableStateFlow(EnvState.Idle)
+    val adbState: StateFlow<EnvState> = _adbState.stateInScope(EnvState.Idle)
 
-    val allRequiredValidated: StateFlow<Boolean> = combine(_rootState, _abiState) { root, abi -> root == EnvState.Succeed && abi == EnvState.Succeed }.flowOnIO().stateInScope(false)
+    /**
+     * Satu mode eksekusi cukup: root, Shizuku, atau ADB mandiri. ABI tetap
+     * wajib karena binary bawaan harus cocok dengan perangkat.
+     */
+    val allRequiredValidated: StateFlow<Boolean> = combine(_rootState, _adbState, _abiState) { root, adb, abi ->
+        (root == EnvState.Succeed || adb == EnvState.Succeed) && abi == EnvState.Succeed
+    }.flowOnIO().stateInScope(false)
     val allOptionalValidated: StateFlow<Boolean> = _notificationState.map { notification -> notification == EnvState.Succeed }.flowOnIO().stateInScope(false)
 }

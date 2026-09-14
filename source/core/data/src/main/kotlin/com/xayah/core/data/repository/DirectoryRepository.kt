@@ -41,7 +41,7 @@ class DirectoryRepository @Inject constructor(
     // ------------------------------------------------------------------
 
     private suspend fun listDirPaths(path: String): List<String> =
-        if (BaseUtil.isShizukuMode()) {
+        if (BaseUtil.isShellMode()) {
             runCatching { File(path).listFiles()?.map { it.absolutePath } ?: emptyList() }
                 .getOrDefault(emptyList())
         } else {
@@ -55,7 +55,7 @@ class DirectoryRepository @Inject constructor(
      * jadi tidak perlu root.
      */
     private suspend fun statFsOf(path: String): StatFsParcelable =
-        if (BaseUtil.isShizukuMode()) {
+        if (BaseUtil.isShellMode()) {
             runCatching {
                 val stat = StatFs(path)
                 StatFsParcelable(availableBytes = stat.availableBytes, totalBytes = stat.totalBytes)
@@ -83,7 +83,7 @@ class DirectoryRepository @Inject constructor(
      * dipasang FUSE di `/storage/<uuid>`.
      */
     private fun externalAccessPath(rawPath: String): String =
-        if (BaseUtil.isShizukuMode() && rawPath.startsWith("/mnt/media_rw/")) {
+        if (BaseUtil.isShellMode() && rawPath.startsWith("/mnt/media_rw/")) {
             rawPath.replace("/mnt/media_rw/", "/storage/")
         } else {
             rawPath
@@ -217,7 +217,7 @@ class DirectoryRepository @Inject constructor(
                     val tags = mutableListOf<String>()
                     // Tabel mount memuat jalur mentah; jalur FUSE yang dipakai mode
                     // shell tidak ada di sana, jadi pemeriksaan format dilewati.
-                    val type = if (BaseUtil.isShizukuMode()) {
+                    val type = if (BaseUtil.isShellMode()) {
                         ""
                     } else {
                         PreparationUtil.getExternalStorageType(parent).out.firstOrNull() ?: ""

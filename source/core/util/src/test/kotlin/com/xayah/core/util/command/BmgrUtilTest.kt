@@ -1,7 +1,9 @@
 package com.xayah.core.util.command
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -54,5 +56,39 @@ class BmgrUtilTest {
 
         // "Ancestral: 9" ada di dalam baris lain, jadi tetap terbaca.
         assertEquals("94", Bmgr.parseToken(output))
+    }
+
+    // ------------------------------------------------------------------
+    // isBackupSuccess
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `isBackupSuccess menerima hasil sukses untuk paket yang diminta`() {
+        val output = """
+            Running incremental backup for 1 requested packages.
+            Package @pm@ with result: Success
+            Package com.example.game with progress: 5120/3072
+            Package com.example.game with result: Success
+            Backup finished with result: Success
+        """.trimIndent()
+
+        assertTrue(Bmgr.isBackupSuccess(output = output, packageName = "com.example.game"))
+    }
+
+    @Test
+    fun `isBackupSuccess menolak saat paket gagal walau pm sukses`() {
+        val output = """
+            Running incremental backup for 1 requested packages.
+            Package com.example.game with result: Backup is not allowed
+            Package @pm@ with result: Success
+            Backup finished with result: Success
+        """.trimIndent()
+
+        assertFalse(Bmgr.isBackupSuccess(output = output, packageName = "com.example.game"))
+    }
+
+    @Test
+    fun `isBackupSuccess menolak keluaran tanpa hasil paket`() {
+        assertFalse(Bmgr.isBackupSuccess(output = "Backup finished with result: Success", packageName = "com.example.game"))
     }
 }

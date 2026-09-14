@@ -64,7 +64,7 @@ class RemoteRootService(private val context: Context) {
      * Saat mode Shizuku aktif, libsu sama sekali tidak boleh disentuh — kalau
      * disentuh ia akan mencoba membangun proses root dan gagal berulang kali.
      */
-    private fun shellMode(): Boolean = BaseUtil.isShizukuMode()
+    private fun shellMode(): Boolean = BaseUtil.isShellMode()
 
     init {
         // ShellFileOps perlu tahu direktori sementara yang bisa dibaca shell.
@@ -333,7 +333,11 @@ class RemoteRootService(private val context: Context) {
         else runCatching { getService().queryInstalled(packageName, userId) }.onFailure(onFailure).getOrElse { false }
 
     suspend fun getPackageUid(packageName: String, userId: Int): Int =
-        if (shellMode()) -1
+        // PackageManager aplikasi bisa membaca uid paket lain tanpa hak khusus;
+        // tanpa ini restore di mode shell berhenti dengan "Failed to get uid".
+        if (shellMode()) runCatching {
+            context.packageManager.getPackageInfo(packageName, 0).applicationInfo?.uid ?: -1
+        }.getOrDefault(-1)
         else runCatching { getService().getPackageUid(packageName, userId) }.onFailure(onFailure).getOrElse { -1 }
 
     suspend fun getUserHandle(userId: Int): UserHandle? =
@@ -346,7 +350,8 @@ class RemoteRootService(private val context: Context) {
         else runCatching { getService().queryStatsForPackage(packageInfo, user) }.onFailure(onFailure).getOrNull()
 
     suspend fun getUsers(): List<UserInfo> =
-        // AppsRepo membatasi diri ke pengguna aktif pada mode Shizuku.
+        // Daftar pengguna hanya tersedia lewat daemon root. Pemanggil di mode
+        // shell (UsersRepo) membangun pengguna aktifnya sendiri.
         if (shellMode()) listOf()
         else runCatching { getService().users }.onFailure(onFailure).getOrElse { listOf() }
 

@@ -145,7 +145,7 @@ class AppsRepo @Inject constructor(
      * backup akan mencoba dan gagal. Jalur penggantinya adalah `bmgr`.
      */
     suspend fun selectDataItems(id: Long, apk: DataState, user: DataState, userDe: DataState, data: DataState, obb: DataState, media: DataState) {
-        val shellMode = BaseUtil.isShizukuMode()
+        val shellMode = BaseUtil.isShellMode()
         val userSafe = if (shellMode) DataState.NotSelected else user
         val userDeSafe = if (shellMode) DataState.NotSelected else userDe
         appsDao.selectDataItemsById(id, apk.name, userSafe.name, userDeSafe.name, data.name, obb.name, media.name)
@@ -398,7 +398,7 @@ class AppsRepo @Inject constructor(
             updateEntity.extraInfo.hasKeystore = PackageUtil.hasKeystore(context.readCustomSUFile().first(), uid)
             // SSAID tersimpan di /data/system/users/<id>/settings_ssaid.xml
             // yang hanya bisa dibaca uid 0, jadi dilewati pada mode Shizuku.
-            updateEntity.extraInfo.ssaid = if (BaseUtil.isShizukuMode()) {
+            updateEntity.extraInfo.ssaid = if (BaseUtil.isShellMode()) {
                 ""
             } else {
                 rootService.getPackageSsaidAsUser(packageName = info.packageName, uid = uid, userId = userId)
@@ -466,7 +466,7 @@ class AppsRepo @Inject constructor(
     private fun currentUserId(): Int = Process.myUid() / perUserRange
 
     private suspend fun users(): List<UserInfo> =
-        if (BaseUtil.isShizukuMode()) {
+        if (BaseUtil.isShellMode()) {
             listOf(UserInfo(id = currentUserId(), name = "Owner"))
         } else {
             // Dipetakan ulang supaya tipenya pasti UserInfo model, bukan tipe
@@ -475,7 +475,7 @@ class AppsRepo @Inject constructor(
         }
 
     private suspend fun installedPackages(userId: Int): List<android.content.pm.PackageInfo> =
-        if (BaseUtil.isShizukuMode()) {
+        if (BaseUtil.isShellMode()) {
             runCatching { context.packageManager.getInstalledPackages(0) }.getOrDefault(emptyList())
         } else {
             rootService.getInstalledPackagesAsUser(0, userId)
@@ -486,14 +486,14 @@ class AppsRepo @Inject constructor(
         flags: Int,
         userId: Int,
     ): android.content.pm.PackageInfo? =
-        if (BaseUtil.isShizukuMode()) {
+        if (BaseUtil.isShellMode()) {
             runCatching { context.packageManager.getPackageInfo(packageName, flags) }.getOrNull()
         } else {
             rootService.getPackageInfoAsUser(packageName, flags, userId)
         }
 
     private suspend fun userHandleOf(userId: Int): UserHandle? =
-        if (BaseUtil.isShizukuMode()) {
+        if (BaseUtil.isShellMode()) {
             // Hanya pengguna aktif yang dijangkau; pengguna lain butuh hak istimewa.
             Process.myUserHandle().takeIf { currentUserId() == userId }
         } else {
@@ -509,7 +509,7 @@ class AppsRepo @Inject constructor(
      * istimewa.
      */
     private suspend fun permissionsOf(info: android.content.pm.PackageInfo): List<PackagePermission> =
-        if (BaseUtil.isShizukuMode()) {
+        if (BaseUtil.isShellMode()) {
             val requested = info.requestedPermissions ?: return emptyList()
             val grantedFlags = info.requestedPermissionsFlags ?: IntArray(0)
             requested.mapIndexedNotNull { index, name ->
@@ -534,7 +534,7 @@ class AppsRepo @Inject constructor(
      * tetap terlihat dari perhitungan berkas saat backup dijalankan.
      */
     private suspend fun storageStats(info: android.content.pm.PackageInfo, userHandle: UserHandle?) =
-        if (BaseUtil.isShizukuMode()) {
+        if (BaseUtil.isShellMode()) {
             null
         } else {
             userHandle?.let { rootService.queryStatsForPackage(info, it) }

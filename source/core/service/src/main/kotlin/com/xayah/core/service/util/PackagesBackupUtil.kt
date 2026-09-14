@@ -286,6 +286,12 @@ class PackagesBackupUtil @Inject constructor(
         if (p.getDataSelected(dataType).not()) {
             isSuccess = true
             t.updateInfo(dataType = dataType, state = OperationState.SKIP)
+        } else if (BaseUtil.isShellMode() && (dataType == DataType.PACKAGE_USER || dataType == DataType.PACKAGE_USER_DE)) {
+            // Data privat tidak bisa dibaca uid 2000. Jalurnya `bmgr`, jadi
+            // jangan pernah menandai keduanya gagal di sini.
+            isSuccess = true
+            out.add(log { "Private data is backed up via bmgr, skip tar." })
+            t.updateInfo(dataType = dataType, state = OperationState.SKIP, log = out.toLineString())
         } else {
             // Check the existence of origin path.
             val src = packageRepository.getDataSrc(srcDir, packageName)
@@ -409,13 +415,27 @@ class PackagesBackupUtil @Inject constructor(
      * dari factory reset — hanya berguna untuk pemulihan di perangkat yang sama.
      */
     suspend fun backupPrivateBmgr(p: PackageEntity) = run {
-        if (BaseUtil.isShizukuMode().not()) return@run
+        if (BaseUtil.isShellMode().not()) return@run
 
         log { "Backing up private data via bmgr..." }
         val packageName = p.packageName
 
+        // `bmgr backupnow` menolak jalan kalau BackupManager nonaktif — dan di
+        // MIUI bawaan memang nonaktif. Tanpa ini data privat terlewat diam-diam.
+        if (Bmgr.isEnabled().not()) {
+            Bmgr.setEnabled(true)
+            // Status "enabled" di BackupManagerService tidak langsung berubah
+            // setelah `bmgr enable true` selesai; backup pertama bisa ditolak.
+            delay(1_000)
+        }
+
         Bmgr.selectTransport(Bmgr.TRANSPORT_LOCAL)
-        val outcome = Bmgr.backupNow(packageName)
+        var outcome = Bmgr.backupNow(packageName)
+        if (outcome.success.not() && outcome.output.contains("not allowed", ignoreCase = true)) {
+            log { "bmgr belum siap, mencoba sekali lagi..." }
+            delay(1_000)
+            outcome = Bmgr.backupNow(packageName)
+        }
         outcome.output.lineSequence().filter { it.isNotBlank() }.forEach { log { it } }
 
         val token = outcome.token

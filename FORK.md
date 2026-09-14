@@ -356,6 +356,125 @@ baris pertama membuat ukuran terbaca 0 tanpa penjelasan.
 
 Unit test: `core/rootservice/src/test/.../ShellOutputParserTest.kt` (17 kasus).
 
+### 14. ADB mandiri - tanpa Shizuku
+
+Shizuku bagus, tetapi ia aplikasi pihak ketiga yang harus dipasang dan
+dinyalakan ulang setiap reboot. Untuk menghindarinya, fork ini membawa **klien
+ADB sendiri**: aplikasi berbicara protokol ADB langsung ke `adbd` di perangkat
+yang sama, persis seperti aplikasi LADB.
+
+Tidak ada izin ADB yang bisa diberikan lewat `pm grant` untuk menjalankan
+perintah shell — uid 2000 hanya bisa dipinjam lewat Shizuku, root, atau
+koneksi ADB. Jalur ketiga inilah yang dipakai di sini.
+
+Ada dua alur sesuai versi Android:
+
+- **Android 11+ (Wireless debugging):** pairing sekali dengan kode 6 digit;
+  port ditemukan lewat mDNS. Setelah itu tidak perlu PC lagi.
+- **Android 10 (ADB over USB):** 1) sambungkan USB & aktifkan USB debugging,
+  2) di PC jalankan `adb tcpip 5555`, 3) tekan OK di app lalu pilih
+  **Izinkan** pada dialog debugging di HP. Kunci app tersimpan di `adb_keys`,
+  jadi setelah reboot cukup mengulang `adb tcpip 5555` (2 detik) — dialog izin
+  tidak muncul lagi.
+
+Alur Wireless debugging (Android 11+):
+
+1. Setup → tombol **ADB (tanpa Shizuku)** → panduan menyalakan Wireless
+   debugging dan membuka layar *Pair device with pairing code*.
+2. Port pairing ditemukan lewat mDNS (`_adb-tls-pairing._tcp`) dan diisi
+   otomatis; pengguna mengetik kode 6 digit.
+3. Setelah pairing, kunci RSA disimpan di `filesDir/adb-key` sehingga
+   penyambungan berikutnya tidak perlu kode lagi — termasuk setelah reboot,
+   selama Wireless debugging masih menyala.
+
+Yang ditambahkan:
+
+| Bagian | Peran |
+|---|---|
+| `core/util/.../command/AdbShell.kt` | `pair`, `connect`, `discoverPairingPort`, `exec`, `stageBinaries`, plus `LocalAdbManager` (kunci + sertifikat) |
+| `ShellBinStaging.kt` | penyinggahan `busybox`/`tar`/`zstd` yang dipakai bersama Shizuku dan ADB |
+| `ShellModeInitializer.kt` | menyambung ulang backend saat aplikasi dibuka |
+| `BaseUtil` | `ShellBackend` (SHIZUKU/ADB), `expectShellMode()`, `isShellMode()` |
+| `MainActivity` | menandai mode shell lalu menyambung di latar belakang |
+| Setup page one | tombol dan dialog pairing |
+
+Detail teknis:
+
+- **Exit code** tidak dibawa stream ADB, jadi tiap perintah ditutup
+  `echo <penanda>$?` di dalam subkulit; `AdbExecOutput` mengambil kodenya dan
+  membuang penandanya. Ada unit test (7 kasus) untuk pengurai ini.
+- **Pembacaan keluaran berhenti saat penanda terlihat, bukan menunggu EOF.**
+  libadb 3.1.1 dapat menahan `read()` setelah peer menutup stream ketika data
+  terakhir sudah terkirim (`mPendingClose` tidak dicek di loop tunggu), sehingga
+  `readText()` menggantung sampai watchdog. Terbukti di perangkat Android 10:
+  perintah berjalan (binary tersalin) tetapi hasilnya dianggap timeout.
+  `readUntilMarker()` membaca per potongan dan berhenti begitu penanda muncul.
+- **Timeout** perintah shell dinaikkan dari 30 detik menjadi 600 detik
+  (`ShizukuShell` dan `AdbShell`). Kompresi `tar` untuk game besar bisa
+  berjalan beberapa menit; nilai <= 0 berarti tanpa batas waktu.
+- **`isShizukuMode()` diganti `isShellMode()`** di 27 titik. Semua percabangan
+  itu sebenarnya berarti "berjalan sebagai uid 2000", bukan "memakai Shizuku",
+  jadi sekarang berlaku juga untuk ADB mandiri.
+- **`Tar.compressInCur` diperbaiki.** Sebelumnya ia menjalankan `cd` sebagai
+  perintah terpisah, yang hanya bekerja pada sesi libsu persisten — pada mode
+  shell (perintah = proses terpisah) `cd` tidak berpengaruh sehingga backup APK
+  gagal. Sekarang `cd ... && tar ...` dijalankan sebagai satu perintah.
+- **`expectShellMode()`** di startup mencegah perintah jatuh ke libsu sebelum
+  backend siap. Tanpa ini, di perangkat tanpa root perintah dijalankan sebagai
+  uid aplikasi dan gagal tanpa sebab yang jelas.
+- Dependensi: `com.github.MuntashirAkon:libadb-android:3.1.1` (GPL-3/Apache
+  dual) + `bcpkix-jdk18on`; `bcprov-jdk15to18` bawaan libadb dibuang supaya
+  tidak bentrok dengan `bcprov-jdk18on` milik aplikasi.
+
+Batasan yang perlu diuji di perangkat:
+
+- Wireless debugging MIUI kadang mematikan diri atau mengganti port; auto
+  connect lewat mDNS sudah disiapkan, tetapi pairing ulang mungkin perlu kalau
+  kunci dihapus.
+- Android 10: `adb tcpip 5555` harus diulang setiap reboot (adbd kembali ke
+  mode USB), jadi jalur ini tetap butuh koneksi PC singkat per boot.
+- **Sudah diuji di perangkat**: POCO X3 NFC, MIUI 12 / Android 10. Alur
+  `adb tcpip 5555` + izinkan kunci → tombol ADB hijau, binary tersalin ke
+  `/data/local/tmp/databackup-bin`, Validasi ABI hijau, Continue aktif.
+  Alur Wireless debugging (Android 11+) belum diuji perangkat.
+
+### 15. Hasil uji perangkat Android 10
+
+Uji end-to-end dilakukan di POCO X3 NFC (MIUI 12 / Android 10) memakai
+**dummy game** yang dibuat khusus: paket `com.databackup.testgame` dengan
+`isGame`/`appCategory=game`, `allowBackup=true`, dan data lengkap — akun login
+di `shared_prefs`, save + config di `files/`, database SQLite, aset unduhan di
+`Android/data`, dua berkas OBB, dan satu berkas media. Semua jenis data
+diverifikasi pulih identik setelah wipe (akun `player_5415`, 3 item DB, OBB
+4 MB + 1 MB, video 512 KB).
+
+Sepuluh bug nyata ditemukan dan diperbaiki selama uji ini:
+
+| # | Gejala | Penyebab | Perbaikan |
+|---|---|---|---|
+| 1 | `zstd: inaccessible or not found`, `tar: Unknown option totals` | `AdbShell` tidak menyetel `PATH`; `tar`/`zstd` jatuh ke versi sistem | `ShellEnv.wrap()` dipakai bersama Shizuku & ADB |
+| 2 | Perintah berhasil tapi dianggap timeout | libadb 3.1.1 menahan `read()` setelah peer menutup stream | `readUntilMarker()` berhenti saat penanda exit code terlihat |
+| 3 | Daftar game kosong walau DB berisi | `UsersRepo.getUsers(BACKUP)` mengembalikan daftar kosong di mode shell, filter user menyingkirkan semua | Bangun pengguna aktif dari uid aplikasi |
+| 4 | Restore APK gagal, `avc: denied ... sdcardfs` | system_server tidak bisa membaca APK dari `/sdcard` | `Pm.prepareSource()` menyalin APK ke `/data/local/tmp` |
+| 5 | `INSTALL_FAILED_VERSION_DOWNGRADE` | APK backup lebih tua dari yang terpasang | Tambah flag `-d` pada `pm install` |
+| 6 | `Failed to get uid of <pkg>` | `getPackageUid` mengembalikan `-1` di mode shell | Baca uid lewat `PackageManager` aplikasi |
+| 7 | `user.tar.zst` tidak ada dianggap kegagalan restore | Data privat di mode shell ditangani `bmgr`, bukan tar | USER/USER_DE di-skip (bukan error) di backup **dan** restore |
+| 8 | `bmgr` menolak: "Backup is not allowed" | `am force-stop` membuat paket berstatus *stopped* | Ambil data privat lewat `bmgr` **sebelum** app di-kill |
+| 9 | Backup privat dianggap sukses padahal gagal | `with result: Success` cocok dengan pseudo-paket `@pm@` | Deteksi per paket: `Package <pkg> with result: Success` |
+| 10 | BackupManager nonaktif di MIUI | `bmgr backupnow` gagal tanpa penjelasan | `Bmgr.setEnabled(true)` otomatis sebelum backup/restore |
+
+Catatan operasional:
+
+- **Instalasi APK di MIUI**: `adb install` sering ditolak
+  `INSTALL_FAILED_USER_RESTRICTED`; tembus dengan
+  `adb shell pm install -i com.android.vending <apk>` dari `/data/local/tmp`.
+- **`adb tcpip 5555` harus diulang setiap reboot** (adbd kembali ke mode USB);
+  kunci app tetap tersimpan sehingga tidak ada dialog izin lagi.
+- Citra `bmgr` transport `local` tetap hanya bisa dipulihkan di perangkat yang
+  sama (lihat bagian 12).
+- Bug #8 dan #9 sempat membuat data privat tampak "berhasil di-backup" padahal
+  kosong; keduanya wajib ada agar jalur privat bisa diandalkan.
+
 ---
 
 ## Yang belum dikerjakan

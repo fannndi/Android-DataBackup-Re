@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.xayah.core.ui.component.AnimatedNavHost
@@ -16,6 +17,7 @@ import com.xayah.core.ui.route.MainRoutes
 import com.xayah.core.ui.theme.DataBackupTheme
 import com.xayah.core.ui.util.LocalNavController
 import com.xayah.core.util.command.BaseUtil
+import com.xayah.core.util.command.ShellModeInitializer
 import com.xayah.feature.main.configurations.PageConfigurations
 import com.xayah.feature.main.dashboard.PageDashboard
 import com.xayah.feature.main.details.DetailsRoute
@@ -35,7 +37,9 @@ import com.xayah.feature.main.settings.blacklist.PageBlackList
 import com.xayah.feature.main.settings.language.PageLanguageSelector
 import com.xayah.feature.main.settings.restore.PageRestoreSettings
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 @AndroidEntryPoint
@@ -53,6 +57,14 @@ class MainActivity : AppCompatActivity() {
             runCatching {
                 BaseUtil.initializeEnvironment(context = this@MainActivity)
             }
+        }
+
+        // Mode shell (Shizuku/ADB) hilang saat proses mati. Tandai lebih dulu
+        // supaya perintah tidak jatuh ke jalur root, lalu sambungkan kembali
+        // di latar belakang agar UI tidak menunggu.
+        BaseUtil.expectShellMode(applicationContext)
+        lifecycleScope.launch(Dispatchers.IO) {
+            runCatching { ShellModeInitializer.initialize(applicationContext) }
         }
 
         setContent {

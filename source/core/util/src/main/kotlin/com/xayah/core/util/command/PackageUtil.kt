@@ -9,7 +9,7 @@ object PackageUtil {
      * backup, bukan jalannya backup itu sendiri.
      */
     suspend fun hasKeystore(su: String, uid: Int): Boolean {
-        if (BaseUtil.isShizukuMode()) return false
+        if (BaseUtil.isShellMode()) return false
 
         // su $uid -c keystore_cli_v2 list
         return BaseUtil.execute(
