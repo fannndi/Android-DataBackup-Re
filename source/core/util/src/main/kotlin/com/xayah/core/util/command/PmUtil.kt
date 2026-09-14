@@ -6,6 +6,17 @@ import com.xayah.core.util.model.ShellResult
 
 object Pm {
     private suspend fun execute(vararg args: String): ShellResult = BaseUtil.execute("pm", *args)
+
+    /**
+     * Menghapus seluruh data sebuah paket.
+     *
+     * Dipakai sebelum `bmgr restore`, karena BackupManager menulis ulang
+     * seluruh data aplikasi dan sisa data lama bisa membuat hasilnya campur.
+     * Ini juga yang membuat kepemilikan berkas benar tanpa perlu `chown`.
+     */
+    suspend fun clear(userId: Int, packageName: String): ShellResult =
+        execute("clear", "--user", "$userId", "$QUOTE$packageName$QUOTE")
+
     suspend fun install(userId: Int, src: String): ShellResult = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
         // pm install --user "$userId" -r -t "$src"
         execute(

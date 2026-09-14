@@ -92,6 +92,14 @@ data class PackageExtraInfo(
     var activated: Boolean,
     @ColumnInfo(defaultValue = "1") var firstUpdated: Boolean,
     @ColumnInfo(defaultValue = "1") var enabled: Boolean,
+    /**
+     * Token restore BackupManager untuk data privat.
+     *
+     * Diisi saat backup pada mode Shizuku, ketika data privat ditangkap lewat
+     * `bmgr` alih-alih pembacaan berkas. Kosong berarti tidak ada citra bmgr,
+     * misalnya pada backup mode root atau sebelum fitur ini ada.
+     */
+    @ColumnInfo(defaultValue = "") var bmgrToken: String = "",
 )
 
 @Serializable

@@ -169,6 +169,10 @@ internal abstract class AbstractBackupService : AbstractPackagesService() {
                     backup(type = DataType.PACKAGE_MEDIA, p = p, r = restoreEntity, t = pkg, dstDir = dstDir)
                     mPackagesBackupUtil.backupPermissions(p = p)
                     mPackagesBackupUtil.backupSsaid(p = p)
+                    // Data privat lewat BackupManager. Hanya berjalan pada mode
+                    // Shizuku; hasilnya disimpan di extraInfo sebelum konfigurasi
+                    // backup ditulis di bawah.
+                    mPackagesBackupUtil.backupPrivateBmgr(p = p)
 
                     if (pkg.isSuccess) {
                         // Save config

@@ -21,6 +21,7 @@ import com.xayah.core.util.LogUtil
 import com.xayah.core.util.PathUtil
 import com.xayah.core.util.SymbolUtil
 import com.xayah.core.util.command.Appops
+import com.xayah.core.util.command.Bmgr
 import com.xayah.core.util.command.BaseUtil
 import com.xayah.core.util.command.Pm
 import com.xayah.core.util.command.SELinux
@@ -423,6 +424,39 @@ class PackagesRestoreUtil @Inject constructor(
         } else {
             log { "Skip." }
         }
+    }
+
+    /**
+     * Memulihkan data privat game lewat BackupManager.
+     *
+     * Harus dijalankan **setelah APK terpasang tetapi sebelum data eksternal
+     * dipulihkan**, karena `pm clear` di dalamnya mengosongkan data aplikasi
+     * lebih dulu. Urutan itu juga yang membuat berkas hasil restore memiliki
+     * kepemilikan yang benar tanpa perlu `chown`.
+     *
+     * Dilewati kalau tidak ada token bmgr — misalnya pada backup mode root,
+     * atau game yang memakai `allowBackup="false"` sehingga tidak menghasilkan
+     * citra.
+     */
+    suspend fun restorePrivateBmgr(userId: Int, p: PackageEntity) = run {
+        val token = p.extraInfo.bmgrToken
+        if (BaseUtil.isShizukuMode().not() || token.isEmpty()) return@run
+
+        val packageName = p.packageName
+        log { "Restoring private data via bmgr..." }
+
+        // Kosongkan data lama supaya hasil restore tidak bercampur.
+        Pm.clear(userId = userId, packageName = packageName).also { result ->
+            if (result.isSuccess.not()) log { "pm clear gagal untuk $packageName." }
+        }
+
+        Bmgr.selectTransport(Bmgr.TRANSPORT_LOCAL)
+        Bmgr.restore(token = token, packageName = packageName).out
+            .filter { it.isNotBlank() }
+            .forEach { log { it } }
+        Bmgr.run()
+
+        log { "bmgr restore selesai untuk $packageName." }
     }
 
     suspend fun download(

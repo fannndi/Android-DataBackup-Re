@@ -24,7 +24,7 @@ import com.xayah.core.model.database.TaskDetailPackageEntity
 import com.xayah.core.model.database.TaskEntity
 
 @Database(
-    version = 7,
+    version = 8,
     exportSchema = true,
     entities = [
         PackageEntity::class,
@@ -46,6 +46,9 @@ import com.xayah.core.model.database.TaskEntity
         AutoMigration(from = 4, to = 5),
         AutoMigration(from = 5, to = 6, spec = DatabaseMigrations.Schema5to6::class),
         AutoMigration(from = 6, to = 7),
+        // Menambahkan kolom bmgrToken pada PackageExtraInfo; Room menyusun
+        // migrasinya sendiri karena kolomnya punya nilai default.
+        AutoMigration(from = 7, to = 8),
     ]
 )
 @TypeConverters(StringListConverters::class)

@@ -22,6 +22,8 @@ import com.xayah.core.util.IconRelativeDir
 import com.xayah.core.util.LogUtil
 import com.xayah.core.util.PathUtil
 import com.xayah.core.util.SymbolUtil
+import com.xayah.core.util.command.Bmgr
+import com.xayah.core.util.command.BaseUtil
 import com.xayah.core.util.command.Tar
 import com.xayah.core.util.appWorkDir
 import com.xayah.core.util.filesDir
@@ -385,6 +387,47 @@ class PackagesBackupUtil @Inject constructor(
         val ssaid = rootService.getPackageSsaidAsUser(packageName = packageName, uid = uid, userId = userId)
         log { "Ssaid: $ssaid" }
         p.extraInfo.ssaid = ssaid
+    }
+
+    /**
+     * Menangkap data privat game lewat BackupManager.
+     *
+     * Data privat (`/data/user/<id>` dan `/data/user_de/<id>`) tidak bisa dibaca
+     * shell, jadi kita tidak membacanya sendiri: kita meminta
+     * `BackupManagerService` — yang berjalan sebagai uid system — membacanya
+     * dan menyerahkannya ke sebuah transport.
+     *
+     * Token hasilnya disimpan di konfigurasi backup supaya saat restore kita
+     * tahu citra mana yang harus dipulihkan.
+     *
+     * Hanya berjalan pada mode Shizuku. Pada mode root data privat ditangkap
+     * langsung sebagai berkas, jadi jalur ini dilewati.
+     *
+     * Catatan penting: transport `local` menyimpan citranya di direktori privat
+     * aplikasi `com.android.localtransport`, yang tidak bisa dibaca shell.
+     * Artinya citra ini **tidak ikut tersalin ke kartu SD** dan tidak selamat
+     * dari factory reset — hanya berguna untuk pemulihan di perangkat yang sama.
+     */
+    suspend fun backupPrivateBmgr(p: PackageEntity) = run {
+        if (BaseUtil.isShizukuMode().not()) return@run
+
+        log { "Backing up private data via bmgr..." }
+        val packageName = p.packageName
+
+        Bmgr.selectTransport(Bmgr.TRANSPORT_LOCAL)
+        val outcome = Bmgr.backupNow(packageName)
+        outcome.output.lineSequence().filter { it.isNotBlank() }.forEach { log { it } }
+
+        val token = outcome.token
+        if (outcome.success && token != null) {
+            p.extraInfo.bmgrToken = token
+            log { "bmgr token: $token" }
+        } else {
+            // Bukan kegagalan fatal: APK, OBB, dan data eksternal tetap terbackup.
+            // Biasanya karena game memakai allowBackup="false".
+            p.extraInfo.bmgrToken = ""
+            log { "bmgr tidak menghasilkan citra untuk $packageName." }
+        }
     }
 
     suspend fun upload(client: CloudClient, p: PackageEntity, t: TaskDetailPackageEntity, dataType: DataType, srcDir: String, dstDir: String) = run {
