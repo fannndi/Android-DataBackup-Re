@@ -22,10 +22,12 @@ import com.xayah.core.rootservice.parcelables.PathParcelable
 import com.xayah.core.rootservice.parcelables.StatFsParcelable
 import com.xayah.core.rootservice.parcelables.StorageStatsParcelable
 import com.xayah.core.rootservice.util.ExceptionUtil.tryOnScope
+import com.xayah.core.rootservice.util.ShellFileOps
 import com.xayah.core.rootservice.util.withMainContext
 import com.xayah.core.util.GsonUtil
 import com.xayah.core.util.LogUtil
 import com.xayah.core.util.PathUtil
+import com.xayah.core.util.command.BaseUtil
 import com.xayah.core.util.model.ShellResult
 import com.xayah.core.util.withLog
 import kotlinx.coroutines.delay
@@ -55,6 +57,19 @@ class RemoteRootService(private val context: Context) {
 
     // TODO: Will this cause memory leak? It needs to test.
     var onFailure: (Throwable) -> Unit = {}
+
+    /**
+     * True kalau operasi berkas harus dijalankan lewat shell, bukan daemon root.
+     *
+     * Saat mode Shizuku aktif, libsu sama sekali tidak boleh disentuh — kalau
+     * disentuh ia akan mencoba membangun proses root dan gagal berulang kali.
+     */
+    private fun shellMode(): Boolean = BaseUtil.isShizukuMode()
+
+    init {
+        // ShellFileOps perlu tahu direktori sementara yang bisa dibaca shell.
+        ShellFileOps.configure(context)
+    }
 
     private fun log(msg: () -> String) = LogUtil.log { "RemoteRootService" to msg() }
 
@@ -158,19 +173,30 @@ class RemoteRootService(private val context: Context) {
         )
     }
 
-    suspend fun readStatFs(path: String): StatFsParcelable = runCatching { getService().readStatFs(path) }.onFailure(onFailure).getOrElse { StatFsParcelable() }
+    suspend fun readStatFs(path: String): StatFsParcelable =
+        // DirectoryRepository memakai android.os.StatFs sendiri pada mode Shizuku.
+        if (shellMode()) StatFsParcelable()
+        else runCatching { getService().readStatFs(path) }.onFailure(onFailure).getOrElse { StatFsParcelable() }
 
-    suspend fun mkdirs(path: String): Boolean = runCatching { getService().mkdirs(path) }.onFailure(onFailure).getOrElse { false }
+    suspend fun mkdirs(path: String): Boolean =
+        if (shellMode()) ShellFileOps.mkdirs(path)
+        else runCatching { getService().mkdirs(path) }.onFailure(onFailure).getOrElse { false }
 
     suspend fun copyRecursively(path: String, targetPath: String, overwrite: Boolean): Boolean =
-        runCatching { getService().copyRecursively(path, targetPath, overwrite) }.onFailure(onFailure).getOrElse { false }
+        if (shellMode()) ShellFileOps.copyRecursively(path, targetPath, overwrite)
+        else runCatching { getService().copyRecursively(path, targetPath, overwrite) }.onFailure(onFailure).getOrElse { false }
 
     suspend fun copyTo(path: String, targetPath: String, overwrite: Boolean): Boolean =
-        runCatching { getService().copyTo(path, targetPath, overwrite) }.onFailure(onFailure).getOrElse { false }
+        if (shellMode()) ShellFileOps.copyTo(path, targetPath, overwrite)
+        else runCatching { getService().copyTo(path, targetPath, overwrite) }.onFailure(onFailure).getOrElse { false }
 
-    suspend fun renameTo(src: String, dst: String): Boolean = runCatching { getService().renameTo(src, dst) }.onFailure(onFailure).getOrElse { false }
+    suspend fun renameTo(src: String, dst: String): Boolean =
+        if (shellMode()) ShellFileOps.renameTo(src, dst)
+        else runCatching { getService().renameTo(src, dst) }.onFailure(onFailure).getOrElse { false }
 
-    suspend fun writeText(text: String, dst: String): Boolean = runCatching {
+    suspend fun writeText(text: String, dst: String): Boolean = if (shellMode()) {
+        ShellFileOps.writeText(text, dst)
+    } else runCatching {
         var isSuccess = true
         val tmpFilePath = "${context.cacheDir.path}/tmp"
         val tmpFile = File(tmpFilePath)
@@ -181,7 +207,9 @@ class RemoteRootService(private val context: Context) {
         isSuccess
     }.onFailure(onFailure).getOrElse { false }
 
-    suspend fun writeBytes(bytes: ByteArray, dst: String): Boolean = runCatching {
+    suspend fun writeBytes(bytes: ByteArray, dst: String): Boolean = if (shellMode()) {
+        ShellFileOps.writeBytes(bytes, dst)
+    } else runCatching {
         var isSuccess = true
         val tmpFilePath = "${context.cacheDir.path}/tmp"
         val tmpFile = File(tmpFilePath)
@@ -192,14 +220,21 @@ class RemoteRootService(private val context: Context) {
         isSuccess
     }.onFailure(onFailure).getOrElse { false }
 
-    suspend fun exists(path: String): Boolean = runCatching { getService().exists(path) }.onFailure(onFailure).getOrElse { false }
+    suspend fun exists(path: String): Boolean =
+        if (shellMode()) ShellFileOps.exists(path)
+        else runCatching { getService().exists(path) }.onFailure(onFailure).getOrElse { false }
 
-    suspend fun createNewFile(path: String): Boolean = runCatching { getService().createNewFile(path) }.onFailure(onFailure).getOrElse { false }
+    suspend fun createNewFile(path: String): Boolean =
+        if (shellMode()) ShellFileOps.createNewFile(path)
+        else runCatching { getService().createNewFile(path) }.onFailure(onFailure).getOrElse { false }
 
-    suspend fun deleteRecursively(path: String): Boolean = runCatching { getService().deleteRecursively(path) }.onFailure(onFailure).getOrElse { false }
+    suspend fun deleteRecursively(path: String): Boolean =
+        if (shellMode()) ShellFileOps.deleteRecursively(path)
+        else runCatching { getService().deleteRecursively(path) }.onFailure(onFailure).getOrElse { false }
 
     suspend fun listFilePaths(path: String, listFiles: Boolean = true, listDirs: Boolean = true): List<String> =
-        runCatching { getService().listFilePaths(path, listFiles, listDirs) }.onFailure(onFailure).getOrElse { listOf() }
+        if (shellMode()) ShellFileOps.listFilePaths(path, listFiles, listDirs)
+        else runCatching { getService().listFilePaths(path, listFiles, listDirs) }.onFailure(onFailure).getOrElse { listOf() }
 
     private fun readFromParcel(pfd: ParcelFileDescriptor, block: (Parcel) -> Unit) = run {
         val stream = ParcelFileDescriptor.AutoCloseInputStream(pfd)
@@ -211,7 +246,9 @@ class RemoteRootService(private val context: Context) {
         parcel.recycle()
     }
 
-    suspend fun readText(path: String): String = runCatching {
+    suspend fun readText(path: String): String = if (shellMode()) {
+        ShellFileOps.readText(path)
+    } else runCatching {
         val pfd = getService().readText(path)
         var text: String? = null
         readFromParcel(pfd) {
@@ -220,7 +257,9 @@ class RemoteRootService(private val context: Context) {
         text ?: ""
     }.onFailure(onFailure).getOrElse { "" }
 
-    suspend fun readBytes(src: String): ByteArray = runCatching {
+    suspend fun readBytes(src: String): ByteArray = if (shellMode()) {
+        ShellFileOps.readBytes(src)
+    } else runCatching {
         val pfd = getService().readBytes(src)
         var bytes = ByteArray(0)
         readFromParcel(pfd) {
@@ -230,11 +269,17 @@ class RemoteRootService(private val context: Context) {
         bytes
     }.onFailure(onFailure).getOrElse { ByteArray(0) }
 
-    suspend fun calculateSize(path: String): Long = runCatching { getService().calculateSize(path) }.onFailure(onFailure).getOrElse { 0 }
+    suspend fun calculateSize(path: String): Long =
+        if (shellMode()) ShellFileOps.calculateSize(path)
+        else runCatching { getService().calculateSize(path) }.onFailure(onFailure).getOrElse { 0 }
 
-    suspend fun clearEmptyDirectoriesRecursively(path: String) = runCatching { getService().clearEmptyDirectoriesRecursively(path) }.onFailure(onFailure)
+    suspend fun clearEmptyDirectoriesRecursively(path: String) =
+        if (shellMode()) ShellFileOps.clearEmptyDirectoriesRecursively(path)
+        else runCatching { getService().clearEmptyDirectoriesRecursively(path) }.onFailure(onFailure)
 
-    suspend fun setAllPermissions(src: String) = runCatching { getService().setAllPermissions(src) }.onFailure(onFailure)
+    suspend fun setAllPermissions(src: String) =
+        if (shellMode()) ShellFileOps.setAllPermissions(src)
+        else runCatching { getService().setAllPermissions(src) }.onFailure(onFailure)
 
     /**
      * Get the uid and gid of the file/directory
@@ -242,9 +287,15 @@ class RemoteRootService(private val context: Context) {
      * @param path
      * @return Uid to Gid
      */
-    suspend fun getUidGid(path: String): Pair<UInt, UInt> = runCatching { getService().getUidGid(path).let { it[0].toUInt() to it[1].toUInt() } }.onFailure(onFailure).getOrElse { UInt.MAX_VALUE to UInt.MAX_VALUE }
+    suspend fun getUidGid(path: String): Pair<UInt, UInt> =
+        // chown butuh root; pada mode shell kepemilikan tidak bisa dibaca.
+        if (shellMode()) UInt.MAX_VALUE to UInt.MAX_VALUE
+        else runCatching { getService().getUidGid(path).let { it[0].toUInt() to it[1].toUInt() } }.onFailure(onFailure).getOrElse { UInt.MAX_VALUE to UInt.MAX_VALUE }
 
-    suspend fun getInstalledPackagesAsUser(flags: Int, userId: Int): List<PackageInfo> = runCatching {
+    suspend fun getInstalledPackagesAsUser(flags: Int, userId: Int): List<PackageInfo> = if (shellMode()) {
+        // AppsRepo memakai PackageManager biasa pada mode Shizuku.
+        listOf()
+    } else runCatching {
         val pfd = getService().getInstalledPackagesAsUser(flags, userId)
         val packages = mutableListOf<PackageInfo>()
         readFromParcel(pfd) {
@@ -254,37 +305,54 @@ class RemoteRootService(private val context: Context) {
     }.onFailure(onFailure).getOrElse { listOf() }
 
     suspend fun getPackageInfoAsUser(packageName: String, flags: Int, userId: Int) =
-        runCatching { getService().getPackageInfoAsUser(packageName, flags, userId) }.onFailure(onFailure).getOrNull()
+        if (shellMode()) null
+        else runCatching { getService().getPackageInfoAsUser(packageName, flags, userId) }.onFailure(onFailure).getOrNull()
 
     suspend fun grantRuntimePermission(packageName: String, permName: String, user: UserHandle) =
-        runCatching { getService().grantRuntimePermission(packageName, permName, user) }.withLog()
+        if (shellMode()) ShellFileOps.grantRuntimePermission(packageName, permName)
+        else runCatching { getService().grantRuntimePermission(packageName, permName, user) }.withLog()
 
     suspend fun revokeRuntimePermission(packageName: String, permName: String, user: UserHandle) =
-        runCatching { getService().revokeRuntimePermission(packageName, permName, user) }.withLog()
+        if (shellMode()) ShellFileOps.revokeRuntimePermission(packageName, permName)
+        else runCatching { getService().revokeRuntimePermission(packageName, permName, user) }.withLog()
 
     suspend fun getPermissionFlags(packageName: String, permName: String, user: UserHandle) =
-        runCatching { getService().getPermissionFlags(packageName, permName, user) }.onFailure(onFailure).getOrElse { 0 }
+        if (shellMode()) 0
+        else runCatching { getService().getPermissionFlags(packageName, permName, user) }.onFailure(onFailure).getOrElse { 0 }
 
     suspend fun updatePermissionFlags(packageName: String, permName: String, user: UserHandle, flagMask: Int, flagValues: Int) =
-        runCatching { getService().updatePermissionFlags(packageName, permName, user, flagMask, flagValues) }.onFailure(onFailure)
+        if (shellMode()) Unit
+        else runCatching { getService().updatePermissionFlags(packageName, permName, user, flagMask, flagValues) }.onFailure(onFailure)
 
     suspend fun getPackageSourceDir(packageName: String, userId: Int): List<String> =
-        runCatching { getService().getPackageSourceDir(packageName, userId) }.onFailure(onFailure).getOrElse { listOf() }
+        if (shellMode()) ShellFileOps.getPackageSourceDir(packageName)
+        else runCatching { getService().getPackageSourceDir(packageName, userId) }.onFailure(onFailure).getOrElse { listOf() }
 
     suspend fun queryInstalled(packageName: String, userId: Int): Boolean =
-        runCatching { getService().queryInstalled(packageName, userId) }.onFailure(onFailure).getOrElse { false }
+        if (shellMode()) runCatching { context.packageManager.getPackageInfo(packageName, 0) }.isSuccess
+        else runCatching { getService().queryInstalled(packageName, userId) }.onFailure(onFailure).getOrElse { false }
 
     suspend fun getPackageUid(packageName: String, userId: Int): Int =
-        runCatching { getService().getPackageUid(packageName, userId) }.onFailure(onFailure).getOrElse { -1 }
+        if (shellMode()) -1
+        else runCatching { getService().getPackageUid(packageName, userId) }.onFailure(onFailure).getOrElse { -1 }
 
-    suspend fun getUserHandle(userId: Int): UserHandle? = runCatching { getService().getUserHandle(userId) }.onFailure(onFailure).getOrNull()
+    suspend fun getUserHandle(userId: Int): UserHandle? =
+        if (shellMode()) Process.myUserHandle()
+        else runCatching { getService().getUserHandle(userId) }.onFailure(onFailure).getOrNull()
 
     suspend fun queryStatsForPackage(packageInfo: PackageInfo, user: UserHandle): StorageStatsParcelable? =
-        runCatching { getService().queryStatsForPackage(packageInfo, user) }.onFailure(onFailure).getOrNull()
+        // Butuh PACKAGE_USAGE_STATS; pada mode Shizuku ukuran dilewati.
+        if (shellMode()) null
+        else runCatching { getService().queryStatsForPackage(packageInfo, user) }.onFailure(onFailure).getOrNull()
 
-    suspend fun getUsers(): List<UserInfo> = runCatching { getService().users }.onFailure(onFailure).getOrElse { listOf() }
+    suspend fun getUsers(): List<UserInfo> =
+        // AppsRepo membatasi diri ke pengguna aktif pada mode Shizuku.
+        if (shellMode()) listOf()
+        else runCatching { getService().users }.onFailure(onFailure).getOrElse { listOf() }
 
-    suspend fun walkFileTree(path: String): List<PathParcelable> = runCatching {
+    suspend fun walkFileTree(path: String): List<PathParcelable> = if (shellMode()) {
+        ShellFileOps.walkFileTree(path)
+    } else runCatching {
         val pfd = getService().walkFileTree(path)
         val list = mutableListOf<PathParcelable>()
         readFromParcel(pfd) {
@@ -293,40 +361,55 @@ class RemoteRootService(private val context: Context) {
         list
     }.onFailure(onFailure).getOrElse { listOf() }
 
-    suspend fun getPackageArchiveInfo(path: String): PackageInfo? = runCatching { getService().getPackageArchiveInfo(path) }.onFailure(onFailure).getOrNull()
+    suspend fun getPackageArchiveInfo(path: String): PackageInfo? =
+        if (shellMode()) null
+        else runCatching { getService().getPackageArchiveInfo(path) }.onFailure(onFailure).getOrNull()
 
     suspend fun getPackageSsaidAsUser(packageName: String, uid: Int, userId: Int): String =
-        runCatching { getService().getPackageSsaidAsUser(packageName, uid, userId) ?: "" }.onFailure(onFailure).getOrElse { "" }
+        // settings_ssaid.xml hanya bisa dibaca uid 0.
+        if (shellMode()) ""
+        else runCatching { getService().getPackageSsaidAsUser(packageName, uid, userId) ?: "" }.onFailure(onFailure).getOrElse { "" }
 
     suspend fun setPackageSsaidAsUser(packageName: String, uid: Int, userId: Int, ssaid: String) =
-        runCatching { getService().setPackageSsaidAsUser(packageName, uid, userId, ssaid) }.onFailure(onFailure)
+        if (shellMode()) Unit
+        else runCatching { getService().setPackageSsaidAsUser(packageName, uid, userId, ssaid) }.onFailure(onFailure)
 
     suspend fun setDisplayPowerMode(mode: Int) =
-        runCatching { getService().setDisplayPowerMode(mode) }.onFailure(onFailure)
+        if (shellMode()) ShellFileOps.setDisplayPowerMode(mode)
+        else runCatching { getService().setDisplayPowerMode(mode) }.onFailure(onFailure)
 
     suspend fun getScreenOffTimeout() =
-        runCatching { getService().getScreenOffTimeout() }.onFailure(onFailure).getOrElse { DEFAULT_TIMEOUT }
+        if (shellMode()) ShellFileOps.getScreenOffTimeout()
+        else runCatching { getService().getScreenOffTimeout() }.onFailure(onFailure).getOrElse { DEFAULT_TIMEOUT }
 
     suspend fun setScreenOffTimeout(timeout: Int) =
-        runCatching { getService().setScreenOffTimeout(timeout) }.onFailure(onFailure)
+        if (shellMode()) ShellFileOps.setScreenOffTimeout(timeout)
+        else runCatching { getService().setScreenOffTimeout(timeout) }.onFailure(onFailure)
 
     suspend fun forceStopPackageAsUser(packageName: String, userId: Int) =
-        runCatching { getService().forceStopPackageAsUser(packageName, userId) }.onFailure(onFailure)
+        if (shellMode()) ShellFileOps.forceStopPackageAsUser(packageName, userId)
+        else runCatching { getService().forceStopPackageAsUser(packageName, userId) }.onFailure(onFailure)
 
     suspend fun setApplicationEnabledSetting(packageName: String, newState: Int, flags: Int, userId: Int, callingPackage: String?) =
-        runCatching { getService().setApplicationEnabledSetting(packageName, newState, flags, userId, callingPackage) }.onFailure(onFailure)
+        if (shellMode()) ShellFileOps.setApplicationEnabledSetting(packageName, newState, userId)
+        else runCatching { getService().setApplicationEnabledSetting(packageName, newState, flags, userId, callingPackage) }.onFailure(onFailure)
 
     suspend fun getApplicationEnabledSetting(packageName: String, userId: Int): Int? =
-        runCatching { getService().getApplicationEnabledSetting(packageName, userId) }.onFailure(onFailure).getOrNull()
+        if (shellMode()) null
+        else runCatching { getService().getApplicationEnabledSetting(packageName, userId) }.onFailure(onFailure).getOrNull()
 
     suspend fun getPermissions(packageInfo: PackageInfo): List<PackagePermission> =
-        runCatching { getService().getPermissions(packageInfo) }.onFailure(onFailure).getOrElse { listOf() }
+        // AppsRepo membangun daftar izin dari PackageManager pada mode Shizuku.
+        if (shellMode()) listOf()
+        else runCatching { getService().getPermissions(packageInfo) }.onFailure(onFailure).getOrElse { listOf() }
 
     suspend fun setOpsMode(code: Int, uid: Int, packageName: String?, mode: Int) =
-        runCatching { getService().setOpsMode(code, uid, packageName, mode) }.withLog()
+        if (shellMode()) ShellFileOps.setOpsMode(code, packageName, mode)
+        else runCatching { getService().setOpsMode(code, uid, packageName, mode) }.withLog()
 
     suspend fun calculateMD5(src: String): String? =
-        runCatching { getService().calculateMD5(src) }.onFailure(onFailure).getOrNull()
+        if (shellMode()) ShellFileOps.calculateMD5(src)
+        else runCatching { getService().calculateMD5(src) }.onFailure(onFailure).getOrNull()
 
     suspend fun writeJson(data: Any, dst: String): ShellResult = runCatching {
         var isSuccess: Boolean
