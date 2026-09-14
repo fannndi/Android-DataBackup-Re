@@ -64,20 +64,16 @@ class DirectoryRepository @Inject constructor(
             rootService.readStatFs(path)
         }
 
-    /** Ukuran direktori dalam byte, dihitung shell lewat `du`. */
-    private suspend fun sizeOf(path: String): Long =
-        if (BaseUtil.isShizukuMode()) {
-            BaseUtil.execute("du", "-sk", path)
-                .out.firstOrNull()
-                ?.trim()
-                ?.split(Regex("\\s+"))
-                ?.firstOrNull()
-                ?.toLongOrNull()
-                ?.times(1024)
-                ?: 0L
-        } else {
-            rootService.calculateSize(path)
-        }
+    /**
+     * Ukuran direktori dalam byte.
+     *
+     * Percabangan mode ada di [RemoteRootService.calculateSize]: daemon root
+     * atau `du -sk` lewat shell. Penguraian keluaran TIDAK boleh dilakukan di
+     * sini — pesan galat seperti `du: Permission denied` bisa terbaca sebagai
+     * angka dan menghasilkan 0 tanpa penjelasan. Jalur shell sudah menutup
+     * stderr dan memindai baris angka, jadi repository cukup memanggilnya.
+     */
+    private suspend fun sizeOf(path: String): Long = rootService.calculateSize(path)
 
     /**
      * Jalur yang bisa dipakai untuk mengakses penyimpanan eksternal.

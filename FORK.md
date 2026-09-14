@@ -329,6 +329,33 @@ Game dengan `allowBackup="false"` tidak menghasilkan citra. Itu dicatat sebagai
 peringatan, **bukan kegagalan**, karena APK, OBB, dan data eksternal tetap
 terbackup utuh. Token dikosongkan sehingga restore melewati langkah ini.
 
+### 13. Keluaran shell yang diurai: stderr ditutup, pengurai memindai
+
+`ShizukuShell.exec` menggabungkan stdout dan stderr menjadi satu daftar baris,
+sehingga pesan galat bisa terbaca sebagai data. Dampak nyatanya: baris
+`ls: /nope: Permission denied` berubah menjadi jalur palsu
+`/base/ls: /nope: Permission denied`, dan galat `find` menjadi berkas palsu
+yang ikut diproses.
+
+Perbaikannya dua lapis:
+
+1. **Perintah yang keluarannya diurai menutup stderr** dengan `2>/dev/null`
+   (`ls`, `du`, `md5sum`, `base64`, `find`, `cat`). Ini lapis utama, karena
+   nama berkas boleh mengandung titik dua dan spasi — pengurai tidak boleh
+   menebak dari isi baris.
+2. **`ShellOutputParser`** memindai baris yang benar-benar cocok, bukan
+   mengambil baris pertama: `parseDuSize` mencari baris berawalan angka,
+   `parseMd5Sum` mencari 32 digit heksadesimal, `parseLsEntries` membedakan
+   berkas dan direktori dari garis miring `ls -p` sekaligus membuang `.`
+   dan `..`.
+
+`DirectoryRepository.sizeOf()` tidak lagi mengurai `du` sendiri — ia memanggil
+`RemoteRootService.calculateSize()`, sehingga kedua lapis itu berlaku di sana
+juga dan tidak ada pengurai duplikat. Sebelumnya `du: Permission denied` di
+baris pertama membuat ukuran terbaca 0 tanpa penjelasan.
+
+Unit test: `core/rootservice/src/test/.../ShellOutputParserTest.kt` (17 kasus).
+
 ---
 
 ## Yang belum dikerjakan

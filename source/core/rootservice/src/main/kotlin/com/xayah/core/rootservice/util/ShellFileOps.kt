@@ -45,6 +45,20 @@ object ShellFileOps {
 
     private var tmpDir: String = ""
 
+    /**
+     * Membuang stderr pada perintah yang keluarannya diurai.
+     *
+     * `ShizukuShell.exec` menggabungkan stdout dan stderr menjadi satu daftar
+     * baris, sehingga pesan galat bisa terbaca sebagai data. Dua akibat nyata:
+     * `ls: Permission denied` menjadi nama berkas palsu, dan galat `find`
+     * menjadi jalur palsu yang ikut diproses.
+     *
+     * Menutup stderr membuat pengurai hanya melihat data sebenarnya. Ini lebih
+     * andal daripada menebak di pengurai, karena nama berkas boleh mengandung
+     * titik dua dan spasi.
+     */
+    private const val STDERR_TO_NULL = "2>/dev/null"
+
     fun configure(context: Context) {
         tmpDir = context.externalCacheDir?.absolutePath.orEmpty()
     }
@@ -82,27 +96,25 @@ object ShellFileOps {
      * `ls -p` menambahkan garis miring pada nama direktori, jadi pemisahan
      * berkas dan direktori cukup dari satu kali pemanggilan shell.
      */
-    suspend fun listFilePaths(path: String, listFiles: Boolean, listDirs: Boolean): List<String> {
-        if (listFiles.not() && listDirs.not()) return emptyList()
-
-        return run("ls", "-1", "-p", quote(path), log = false).out
-            .map { it.trim() }
-            .filter { it.isNotEmpty() && it != "./" && it != "../" }
-            .mapNotNull { name ->
-                val isDir = name.endsWith("/")
-                if ((isDir && listDirs) || (isDir.not() && listFiles)) {
-                    "$path/${name.trimEnd('/')}"
-                } else {
-                    null
-                }
-            }
-    }
+    suspend fun listFilePaths(path: String, listFiles: Boolean, listDirs: Boolean): List<String> =
+        ShellOutputParser.parseLsEntries(
+            lines = run("ls", "-1", "-p", quote(path), STDERR_TO_NULL, log = false).out,
+            dir = path,
+            listFiles = listFiles,
+            listDirs = listDirs,
+        )
 
     // ------------------------------------------------------------------
     // Baca tulis isi berkas
     // ------------------------------------------------------------------
 
-    suspend fun readText(path: String): String = run("cat", quote(path), log = false).outString
+    /**
+     * Isi berkas sebagai teks.
+     *
+     * stderr ditutup karena pemanggil mengurai hasilnya sebagai JSON —
+     * `cat: ...: No such file or directory` tidak boleh menjadi isi berkas.
+     */
+    suspend fun readText(path: String): String = run("cat", quote(path), STDERR_TO_NULL, log = false).outString
 
     suspend fun writeText(text: String, dst: String): Boolean = writeBytes(text.toByteArray(), dst)
 
@@ -112,11 +124,9 @@ object ShellFileOps {
      * Dibaca sebagai base64 supaya perpindahan lewat shell tidak merusak byte.
      */
     suspend fun readBytes(src: String): ByteArray {
-        val encoded = run("base64", quote(src), log = false).outString
+        val encoded = ShellOutputParser.normalizeBase64(run("base64", quote(src), STDERR_TO_NULL, log = false).out)
         if (encoded.isBlank()) return ByteArray(0)
-        return runCatching {
-            Base64.decode(encoded.replace("\n", "").replace("\r", ""), Base64.DEFAULT)
-        }.getOrDefault(ByteArray(0))
+        return runCatching { Base64.decode(encoded, Base64.DEFAULT) }.getOrDefault(ByteArray(0))
     }
 
     /**
@@ -142,24 +152,11 @@ object ShellFileOps {
 
     /** Ukuran direktori atau berkas dalam byte, lewat `du`. */
     suspend fun calculateSize(path: String): Long =
-        run("du", "-sk", quote(path), log = false).out
-            .firstOrNull()
-            ?.trim()
-            ?.split(Regex("\\s+"))
-            ?.firstOrNull()
-            ?.toLongOrNull()
-            ?.times(1024)
-            ?: 0L
+        ShellOutputParser.parseDuSize(run("du", "-sk", quote(path), STDERR_TO_NULL, log = false).out)
 
     /** MD5 heksadesimal huruf kecil, atau null kalau gagal. */
     suspend fun calculateMD5(src: String): String? =
-        run("md5sum", quote(src), log = false).out
-            .firstOrNull()
-            ?.trim()
-            ?.split(Regex("\\s+"))
-            ?.firstOrNull()
-            ?.lowercase()
-            ?.takeIf { it.length == 32 && it.all { ch -> ch in "0123456789abcdef" } }
+        ShellOutputParser.parseMd5Sum(run("md5sum", quote(src), STDERR_TO_NULL, log = false).out)
 
     /**
      * Semua **berkas** di bawah [path], rekursif.
@@ -168,14 +165,14 @@ object ShellFileOps {
      * memakai daftar berkas, sama seperti implementasi daemon root.
      */
     suspend fun walkFileTree(path: String): List<PathParcelable> =
-        run("find", quote(path), "-type", "f", log = false).out
+        run("find", quote(path), "-type", "f", STDERR_TO_NULL, log = false).out
             .map { it.trim() }
             .filter { it.isNotEmpty() }
             .map { PathParcelable(it) }
 
     /** Menghapus direktori kosong dari yang paling dalam. */
     suspend fun clearEmptyDirectoriesRecursively(path: String) {
-        run("find", quote(path), "-mindepth", "1", "-type", "d", "-empty", "-delete", log = false)
+        run("find", quote(path), "-mindepth", "1", "-type", "d", "-empty", "-delete", STDERR_TO_NULL, log = false)
     }
 
     /**
