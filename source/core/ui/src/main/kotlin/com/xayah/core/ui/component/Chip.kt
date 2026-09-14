@@ -62,6 +62,7 @@ import com.xayah.core.ui.token.PaddingTokens
 import com.xayah.core.ui.token.SizeTokens
 import com.xayah.core.ui.util.icon
 import com.xayah.core.util.SymbolUtil
+import com.xayah.core.util.command.BaseUtil
 
 @Composable
 fun AssistChip(
@@ -470,17 +471,37 @@ fun DataChips(selections: PackageDataStates, displayStats: PackageDataStats? = n
 
         items.forEach {
             val selected = it.getSelected(selections)
+            // Data privat hanya bisa diambil uid 0. Pada mode Shizuku chip-nya
+            // dinonaktifkan supaya pengguna tidak mengira bisa dipilih, padahal
+            // backup-nya akan gagal. Jalur penggantinya adalah bmgr.
+            val available = it.isAvailableInCurrentMode()
             PackageDataChip(
                 modifier = Modifier.weight(1f),
+                enabled = available,
                 dataType = it,
-                selected = selected,
+                selected = selected && available,
                 subtitle = if (isCalculating)
                     it.getDisplayStats(displayStats)?.toDouble()?.formatSize()?.let { size -> "$size${SymbolUtil.DOT}${stringResource(id = R.string.calculating)}" }
                 else
                     it.getDisplayStats(displayStats)?.toDouble()?.formatSize()
             ) {
-                onItemClick(it, selected)
+                if (available) onItemClick(it, selected)
             }
         }
     }
 }
+
+/**
+ * Apakah jenis data ini bisa diambil pada mode eksekusi yang sedang aktif.
+ *
+ * `PACKAGE_USER` dan `PACKAGE_USER_DE` berada di `/data/user/<id>` dan
+ * `/data/user_de/<id>`, keduanya ber-mode `0700` milik uid aplikasi sehingga
+ * uid 2000 tidak bisa membacanya. Pada mode Shizuku jalurnya adalah `bmgr`,
+ * bukan pembacaan berkas.
+ */
+private fun DataType.isAvailableInCurrentMode(): Boolean =
+    if (BaseUtil.isShizukuMode().not()) {
+        true
+    } else {
+        this != DataType.PACKAGE_USER && this != DataType.PACKAGE_USER_DE
+    }

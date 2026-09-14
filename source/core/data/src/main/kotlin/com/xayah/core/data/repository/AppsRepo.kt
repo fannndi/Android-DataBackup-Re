@@ -136,8 +136,19 @@ class AppsRepo @Inject constructor(
         appsDao.activateById(id, selected)
     }
 
+    /**
+     * Memilih bagian data yang akan diproses.
+     *
+     * Data privat (`user` dan `user_de`) berada di `/data/user/<id>` dan
+     * `/data/user_de/<id>` yang hanya bisa dibaca uid 0. Pada mode Shizuku
+     * keduanya dipaksa tidak terpilih, apa pun yang dikirim UI — kalau tidak,
+     * backup akan mencoba dan gagal. Jalur penggantinya adalah `bmgr`.
+     */
     suspend fun selectDataItems(id: Long, apk: DataState, user: DataState, userDe: DataState, data: DataState, obb: DataState, media: DataState) {
-        appsDao.selectDataItemsById(id, apk.name, user.name, userDe.name, data.name, obb.name, media.name)
+        val shellMode = BaseUtil.isShizukuMode()
+        val userSafe = if (shellMode) DataState.NotSelected else user
+        val userDeSafe = if (shellMode) DataState.NotSelected else userDe
+        appsDao.selectDataItemsById(id, apk.name, userSafe.name, userDeSafe.name, data.name, obb.name, media.name)
     }
 
     suspend fun selectAll(ids: List<Long>) {
