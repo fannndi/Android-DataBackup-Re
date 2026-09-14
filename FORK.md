@@ -227,6 +227,32 @@ berulang kali. Terverifikasi: **0 pemanggilan `getService()` tanpa penjaga.**
 Metode yang memang butuh uid 0 mengembalikan nilai kosong yang aman:
 SSAID, `StorageStats`, pembacaan appops, dan permission flags.
 
+### 10. Direktori kerja aplikasi ikut menyesuaikan mode
+
+Pola yang muncul berulang: **apa pun di dalam `filesDir` privat aplikasi tidak
+bisa dibaca maupun ditulis shell**, karena direktori itu ber-mode `0700` milik
+uid aplikasi. Ini sempat membuat kompresi ikon gagal (sumber tidak terbaca) dan
+restore ikon gagal (tujuan tidak bisa ditulis).
+
+`PathUtil.appWorkDir()` menyelesaikannya:
+
+| Mode | Direktori kerja |
+|---|---|
+| root | `filesDir` privat |
+| shell | `getExternalFilesDir(null)` — terjangkau lewat grup `ext_data_rw` |
+
+Yang memakainya: `iconDir()`, `tmpApksDir()`, tujuan dekompresi ikon di
+`AppsRepo`, dan sumber kompresi ikon di `PackagesBackupUtil`.
+
+`PathUtil.setFilesDirSELinux()` tidak melakukan apa pun pada mode Shizuku,
+karena `chown` dan `chcon` butuh uid 0.
+
+Di `PackagesRestoreUtil`, blok `chown`/`chcon` dibungkus penjaga mode Shizuku
+dan **tidak dihitung sebagai kegagalan**. Berkas di penyimpanan eksternal
+dimiliki lewat pemetaan FUSE dan konteksnya ditetapkan media provider, jadi
+aplikasi tetap bisa membacanya. Tanpa ini, restore data eksternal akan
+dilaporkan gagal padahal berhasil.
+
 ---
 
 ## Yang belum dikerjakan
@@ -234,25 +260,33 @@ SSAID, `StorageStats`, pembacaan appops, dan permission flags.
 1. **`Bmgr` belum terhubung ke alur backup/restore.** Kelasnya sudah ada dan
    teruji, tetapi belum dipanggil dari service mana pun. Ini yang menangani
    data privat `/data/data` — bagian yang tidak bisa dijangkau shell sama sekali.
-2. **`core/network`** (SMB/SFTP/FTP/WebDAV) masih ada. Masih dipakai
+   Perlu diingat: citra transport `local` bersifat device-local, jadi bagian ini
+   tidak bisa di-export ke kartu SD dan tidak tahan factory reset.
+2. **Data privat masih bisa dipilih di UI.** Pada mode Shizuku, `PACKAGE_USER`
+   dan `PACKAGE_USER_DE` akan gagal saat backup. Idealnya opsi itu
+   dinonaktifkan atau dialihkan ke `Bmgr`.
+3. **`core/network`** (SMB/SFTP/FTP/WebDAV) masih ada. Masih dipakai
    `CloudRepository`, yang masih di-inject ke `AppsRepo`, `PackageRepository`,
    dan service backup/restore. Menghapusnya menyentuh ~15 berkas di `core/data`
    dan `core/service`.
-3. **`core/service/medium/`** dan `MediumBackupUtil`/`MediumRestoreUtil` masih
+4. **`core/service/medium/`** dan `MediumBackupUtil`/`MediumRestoreUtil` masih
    ada, sekarang tanpa pemakai dari UI.
-4. **`Target.Files`** masih ada di enum, dan masih ditangani di `ListActions`,
+5. **`Target.Files`** masih ada di enum, dan masih ditangani di `ListActions`,
    `ListItems`, `ListItemsViewModel`, `ListBottomSheetViewModel`,
    `ListActionsViewModel`, `ListDataRepo`, `DetailsViewModel`. Sudah tidak bisa
    dijangkau dari UI.
-5. **Ukuran penyimpanan tampil kosong pada mode Shizuku.** Bisa diperbaiki
+6. **Ukuran penyimpanan tampil kosong pada mode Shizuku.** Bisa diperbaiki
    dengan meminta izin `PACKAGE_USAGE_STATS` (Usage access) ke pengguna.
-6. **Belum diuji di perangkat.** Seluruh kode Shizuku baru terverifikasi
+7. **`setDisplayPowerMode` menjadi no-op.** Memaksa layar mati hanya bisa
+   dilakukan sistem.
+8. **Belum diuji di perangkat.** Seluruh kode Shizuku baru terverifikasi
    kompilasi, belum pernah dijalankan di HP sungguhan. Empat hal yang paling
    perlu diuji lebih dulu:
    - apakah `/data/local/tmp/databackup-bin` bisa dieksekusi shell
    - apakah shell bisa menulis ke kartu SD lewat `/storage/<uuid>`
    - apakah `bmgr` diterima untuk game dengan `allowBackup="false"`
    - apakah `find -empty -delete` dan `ls -p` tersedia di toybox perangkat
+
 
 
 
