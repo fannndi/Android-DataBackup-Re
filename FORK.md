@@ -333,10 +333,11 @@ terbackup utuh. Token dikosongkan sehingga restore melewati langkah ini.
 
 ## Yang belum dikerjakan
 
-1. **`core/network`** (SMB/SFTP/FTP/WebDAV) masih ada. Masih dipakai
-   `CloudRepository`, yang masih di-inject ke `AppsRepo`, `PackageRepository`,
-   dan service backup/restore. Menghapusnya menyentuh ~15 berkas di `core/data`
-   dan `core/service`.
+1. **`core/network`** (SMB/SFTP/FTP/WebDAV) masih ada. Modul itu juga berisi
+   pemeriksaan versi rilis dari GitHub yang masih dipakai dashboard, jadi yang
+   bisa dihapus hanya bagian klien cloud-nya. `CloudRepository` masih di-inject
+   ke `AppsRepo`, `PackageRepository`, dan service backup/restore. Menghapusnya
+   menyentuh ~15 berkas di `core/data` dan `core/service`.
 2. **`core/data/repository/FilesRepo.kt`** dan **`MediaRepository.kt`** masih
    ada, beserta `FilesLoadWorker`/`FilesUpdateWorker` dan cabang `Target.Files`
    di `ListActions`, `ListItems`, `ListItemsViewModel`,
@@ -350,16 +351,34 @@ terbackup utuh. Token dikosongkan sehingga restore melewati langkah ini.
    dengan meminta izin `PACKAGE_USAGE_STATS` (Usage access) ke pengguna.
 5. **`setDisplayPowerMode` menjadi no-op.** Memaksa layar mati hanya bisa
    dilakukan sistem.
-6. **Transport portabel untuk citra bmgr.** Lihat batasan di atas. Ini yang
-   akan membuat data privat ikut tersalin ke kartu SD.
+6. **Transport portabel untuk citra bmgr.** Lihat batasan di bagian 12. Ini
+   yang akan membuat data privat ikut tersalin ke kartu SD.
 7. **Belum diuji di perangkat.** Seluruh kode Shizuku terverifikasi kompilasi,
    belum pernah dijalankan di HP sungguhan. Lima hal yang paling perlu diuji
    lebih dulu:
+   - apakah migrasi database 7 ke 8 berjalan mulus saat aplikasi dibuka
    - apakah `/data/local/tmp/databackup-bin` bisa dieksekusi shell
    - apakah shell bisa menulis ke kartu SD lewat `/storage/<uuid>`
    - apakah `bmgr` diterima untuk game dengan `allowBackup="false"`
    - apakah `find -empty -delete` dan `ls -p` tersedia di toybox perangkat
-   - apakah migrasi database 7 ke 8 berjalan mulus saat aplikasi dibuka
+
+---
+
+## Ringkasan permukaan yang sudah bersih
+
+| Permukaan | Status |
+|---|---|
+| Tab dan kartu Cloud di dashboard | Dihapus |
+| Modul `feature/main/cloud` (13 berkas) | Dihapus |
+| Rute Cloud, FTP, SFTP, SMB, WebDAV | Dihapus |
+| Kartu "Backup Files" dan tombol Files di restore | Dihapus |
+| Paket `processing/medium` dan layanan medianya | Dihapus |
+| Opsi Cloud dan Files di halaman Configurations | Dihapus |
+| Pemilih penyimpanan Local/Cloud | Dihapus, hanya lokal |
+| Daftar aplikasi non-game | Disaring di sumber data |
+| Opsi data privat pada mode Shizuku | Dinonaktifkan, dialihkan ke bmgr |
+| Langkah startup untuk daftar berkas | Dihentikan |
+
 
 
 
