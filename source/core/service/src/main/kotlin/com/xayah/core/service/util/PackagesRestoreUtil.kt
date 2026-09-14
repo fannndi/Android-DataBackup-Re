@@ -21,6 +21,7 @@ import com.xayah.core.util.LogUtil
 import com.xayah.core.util.PathUtil
 import com.xayah.core.util.SymbolUtil
 import com.xayah.core.util.command.Appops
+import com.xayah.core.util.command.BaseUtil
 import com.xayah.core.util.command.Pm
 import com.xayah.core.util.command.SELinux
 import com.xayah.core.util.command.Tar
@@ -309,33 +310,41 @@ class PackagesRestoreUtil @Inject constructor(
                     }
 
                     // Restore SELinux context.
-                    var gid: UInt = uid.toUInt()
-                    if (dataType == DataType.PACKAGE_DATA || dataType == DataType.PACKAGE_OBB || dataType == DataType.PACKAGE_MEDIA) {
-                        val (_, pathGid) = rootService.getUidGid(dataType.srcDir(userId))
-                        gid = pathGid
-                    }
-                    SELinux.chown(uid = uid.toUInt(), gid = gid, path = dst).also { result ->
-                        isSuccess = isSuccess && result.isSuccess
-                        out.addAll(result.out)
-                    }
-                    if (pathContext.isNotEmpty()) {
-                        SELinux.chcon(context = pathContext, path = dst).also { result ->
+                    //
+                    // `chown` dan `chcon` butuh uid 0, jadi pada mode Shizuku
+                    // keduanya dilewati — bukan dianggap gagal. Berkas di
+                    // penyimpanan eksternal dimiliki lewat pemetaan FUSE dan
+                    // konteksnya ditetapkan media provider, sehingga aplikasi
+                    // tetap bisa membacanya.
+                    if (BaseUtil.isShizukuMode().not()) {
+                        var gid: UInt = uid.toUInt()
+                        if (dataType == DataType.PACKAGE_DATA || dataType == DataType.PACKAGE_OBB || dataType == DataType.PACKAGE_MEDIA) {
+                            val (_, pathGid) = rootService.getUidGid(dataType.srcDir(userId))
+                            gid = pathGid
+                        }
+                        SELinux.chown(uid = uid.toUInt(), gid = gid, path = dst).also { result ->
                             isSuccess = isSuccess && result.isSuccess
                             out.addAll(result.out)
                         }
-                    } else {
-                        val parentContext: String
-                        SELinux.getContext(dstDir).also { result ->
-                            parentContext = if (result.isSuccess) result.outString.replace("system_data_file", "app_data_file") else ""
-                        }
-                        if (parentContext.isNotEmpty()) {
-                            SELinux.chcon(context = parentContext, path = dst).also { result ->
+                        if (pathContext.isNotEmpty()) {
+                            SELinux.chcon(context = pathContext, path = dst).also { result ->
                                 isSuccess = isSuccess && result.isSuccess
                                 out.addAll(result.out)
                             }
                         } else {
-                            isSuccess = false
-                            out.add(log { "Failed to restore context: $dst" })
+                            val parentContext: String
+                            SELinux.getContext(dstDir).also { result ->
+                                parentContext = if (result.isSuccess) result.outString.replace("system_data_file", "app_data_file") else ""
+                            }
+                            if (parentContext.isNotEmpty()) {
+                                SELinux.chcon(context = parentContext, path = dst).also { result ->
+                                    isSuccess = isSuccess && result.isSuccess
+                                    out.addAll(result.out)
+                                }
+                            } else {
+                                isSuccess = false
+                                out.add(log { "Failed to restore context: $dst" })
+                            }
                         }
                     }
 

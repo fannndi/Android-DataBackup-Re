@@ -25,12 +25,30 @@ const val ConfigsConfigurationsName = "configurations.json"
 const val BinArchiveName = "bin.zip"
 const val CloudTmpRelativeDir = "DataBackupTmpDir"
 
+/**
+ * Direktori kerja aplikasi.
+ *
+ * Saat berjalan sebagai root, `filesDir` privat dipakai apa adanya.
+ *
+ * Saat berjalan sebagai shell (Shizuku), direktori privat aplikasi ber-mode
+ * `0700` milik uid aplikasi sehingga uid 2000 tidak bisa menembusnya. Setiap
+ * berkas yang perlu dibaca atau ditulis oleh shell — ikon, APK sementara,
+ * binary — karena itu harus berada di direktori **eksternal** aplikasi, yang
+ * terjangkau shell lewat grup `ext_data_rw`.
+ */
+fun Context.appWorkDir(): String =
+    if (BaseUtil.isShizukuMode()) {
+        getExternalFilesDir(null)?.absolutePath ?: filesDir()
+    } else {
+        filesDir()
+    }
+
 fun Context.filesDir(): String = filesDir.path
 fun Context.logDir(): String = "${filesDir()}/$LogRelativeDir"
 fun Context.binDir(): String = "${filesDir()}/$BinRelativeDir"
 fun Context.binArchivePath(): String = "${filesDir()}/$BinArchiveName"
-fun Context.iconDir(): String = "${filesDir()}/$IconRelativeDir"
-fun Context.tmpApksDir(): String = "${filesDir()}/$TmpRelativeDir/$ApksRelativeDir"
+fun Context.iconDir(): String = "${appWorkDir()}/$IconRelativeDir"
+fun Context.tmpApksDir(): String = "${appWorkDir()}/$TmpRelativeDir/$ApksRelativeDir"
 fun Context.localBackupSaveDir(): String = runBlocking { readBackupSavePath().first() }
 fun Context.cloudTmpAbsoluteDir(): String = "${filesDir()}/$CloudTmpRelativeDir"
 
@@ -97,11 +115,23 @@ class PathUtil @Inject constructor(
         fun getPackageRestoreConfigDst(dstDir: String): String = "${dstDir}/$ConfigsPackageRestoreName"
         fun getMediaRestoreConfigDst(dstDir: String): String = "${dstDir}/$ConfigsMediaRestoreName"
 
-        suspend fun setFilesDirSELinux(context: Context) = SELinux.getContext(path = context.filesDir()).also { result ->
-            val pathContext = if (result.isSuccess) result.outString else ""
-            SELinux.chcon(context = pathContext, path = context.filesDir())
-            val uidGid = context.applicationInfo.uid.toUInt()
-            SELinux.chown(uid = uidGid, gid = uidGid, path = context.filesDir())
+        /**
+         * Menyesuaikan kepemilikan dan konteks SELinux direktori kerja.
+         *
+         * Hanya berlaku saat root: `chown` dan `chcon` butuh uid 0. Pada mode
+         * Shizuku direktori kerja berada di penyimpanan eksternal aplikasi yang
+         * konteksnya sudah benar dan memang bisa diakses aplikasi, jadi tidak
+         * ada yang perlu disesuaikan.
+         */
+        suspend fun setFilesDirSELinux(context: Context) {
+            if (BaseUtil.isShizukuMode()) return
+
+            SELinux.getContext(path = context.filesDir()).also { result ->
+                val pathContext = if (result.isSuccess) result.outString else ""
+                SELinux.chcon(context = pathContext, path = context.filesDir())
+                val uidGid = context.applicationInfo.uid.toUInt()
+                SELinux.chown(uid = uidGid, gid = uidGid, path = context.filesDir())
+            }
         }
 
         fun getSsaidPath(userId: Int) = "/data/system/users/$userId/settings_ssaid.xml"

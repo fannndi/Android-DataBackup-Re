@@ -52,6 +52,7 @@ import com.xayah.core.util.PathUtil
 import com.xayah.core.util.command.BaseUtil
 import com.xayah.core.util.command.PackageUtil
 import com.xayah.core.util.command.Tar
+import com.xayah.core.util.appWorkDir
 import com.xayah.core.util.filesDir
 import com.xayah.core.util.iconDir
 import com.xayah.core.util.localBackupSaveDir
@@ -554,7 +555,7 @@ class AppsRepo @Inject constructor(
             val loadedIconMD5 = context.readLoadedIconMD5().first()
             val iconMD5 = rootService.calculateMD5(archivePath) ?: ""
             if (loadedIconMD5 != iconMD5) {
-                Tar.decompress(src = archivePath, dst = context.filesDir(), extra = CompressionType.TAR.decompressPara)
+                Tar.decompress(src = archivePath, dst = context.appWorkDir(), extra = CompressionType.TAR.decompressPara)
                 PathUtil.setFilesDirSELinux(context)
                 context.saveLoadedIconMD5(iconMD5)
             }
@@ -570,7 +571,7 @@ class AppsRepo @Inject constructor(
                     val loadedIconMD5 = context.readLoadedIconMD5().first()
                     val iconMD5 = rootService.calculateMD5(path) ?: ""
                     if (loadedIconMD5 != iconMD5) {
-                        Tar.decompress(src = path, dst = context.filesDir(), extra = CompressionType.TAR.decompressPara)
+                        Tar.decompress(src = path, dst = context.appWorkDir(), extra = CompressionType.TAR.decompressPara)
                         PathUtil.setFilesDirSELinux(context)
                         context.saveLoadedIconMD5(iconMD5)
                     }

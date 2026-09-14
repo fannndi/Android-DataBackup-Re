@@ -23,6 +23,7 @@ import com.xayah.core.util.LogUtil
 import com.xayah.core.util.PathUtil
 import com.xayah.core.util.SymbolUtil
 import com.xayah.core.util.command.Tar
+import com.xayah.core.util.appWorkDir
 import com.xayah.core.util.filesDir
 import com.xayah.core.util.model.ShellResult
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -198,7 +199,7 @@ class PackagesBackupUtil @Inject constructor(
         Tar.compress(
             exclusionList = listOf(),
             h = "",
-            srcDir = context.filesDir(),
+            srcDir = context.appWorkDir(),
             src = IconRelativeDir,
             dst = dst,
             extra = tarCt.getCompressPara(context.readCompressionLevel().first())
