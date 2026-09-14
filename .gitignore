@@ -2,3 +2,7 @@
 
 # Data kerja asisten (catatan memori, cache perkakas) — jangan di-commit
 .workbuddy-ai/
+
+# Python
+__pycache__/
+*.pyc
