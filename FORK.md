@@ -253,6 +253,28 @@ dimiliki lewat pemetaan FUSE dan konteksnya ditetapkan media provider, jadi
 aplikasi tetap bisa membacanya. Tanpa ini, restore data eksternal akan
 dilaporkan gagal padahal berhasil.
 
+### 11. Opsi data privat dinonaktifkan pada mode Shizuku
+
+Data privat (`user` dan `user_de`) berada di `/data/user/<id>` dan
+`/data/user_de/<id>` yang ber-mode `0700` milik uid aplikasi. Sebelumnya opsi
+itu tetap bisa dicentang, sehingga backup akan mencoba dan gagal tanpa pengguna
+tahu sebabnya.
+
+Dua lapis penjaga:
+
+1. **`AppsRepo.selectDataItems`** memaksa `user` dan `user_de` menjadi
+   `NotSelected` saat mode Shizuku, apa pun yang dikirim UI. Ini funnel-nya,
+   jadi tidak ada jalur lain yang bisa lolos.
+2. **`DataChips`** menonaktifkan chip `PACKAGE_USER` dan `PACKAGE_USER_DE`
+   lewat parameter `enabled` yang sudah ada di `PackageDataChip`, dan tidak
+   memanggil `onItemClick` untuk keduanya.
+
+Jalur penggantinya adalah `Bmgr`, yang belum tersambung.
+
+Yang diperiksa dan sudah aman tanpa perubahan: **SSAID** mengembalikan string
+kosong saat backup pada mode Shizuku sehingga restore melewatinya, dan
+**restore izin** memakai `pm grant`/`pm revoke` yang bisa dijalankan shell.
+
 ---
 
 ## Yang belum dikerjakan
@@ -262,30 +284,28 @@ dilaporkan gagal padahal berhasil.
    data privat `/data/data` — bagian yang tidak bisa dijangkau shell sama sekali.
    Perlu diingat: citra transport `local` bersifat device-local, jadi bagian ini
    tidak bisa di-export ke kartu SD dan tidak tahan factory reset.
-2. **Data privat masih bisa dipilih di UI.** Pada mode Shizuku, `PACKAGE_USER`
-   dan `PACKAGE_USER_DE` akan gagal saat backup. Idealnya opsi itu
-   dinonaktifkan atau dialihkan ke `Bmgr`.
-3. **`core/network`** (SMB/SFTP/FTP/WebDAV) masih ada. Masih dipakai
+2. **`core/network`** (SMB/SFTP/FTP/WebDAV) masih ada. Masih dipakai
    `CloudRepository`, yang masih di-inject ke `AppsRepo`, `PackageRepository`,
    dan service backup/restore. Menghapusnya menyentuh ~15 berkas di `core/data`
    dan `core/service`.
-4. **`core/service/medium/`** dan `MediumBackupUtil`/`MediumRestoreUtil` masih
+3. **`core/service/medium/`** dan `MediumBackupUtil`/`MediumRestoreUtil` masih
    ada, sekarang tanpa pemakai dari UI.
-5. **`Target.Files`** masih ada di enum, dan masih ditangani di `ListActions`,
+4. **`Target.Files`** masih ada di enum, dan masih ditangani di `ListActions`,
    `ListItems`, `ListItemsViewModel`, `ListBottomSheetViewModel`,
    `ListActionsViewModel`, `ListDataRepo`, `DetailsViewModel`. Sudah tidak bisa
    dijangkau dari UI.
-6. **Ukuran penyimpanan tampil kosong pada mode Shizuku.** Bisa diperbaiki
+5. **Ukuran penyimpanan tampil kosong pada mode Shizuku.** Bisa diperbaiki
    dengan meminta izin `PACKAGE_USAGE_STATS` (Usage access) ke pengguna.
-7. **`setDisplayPowerMode` menjadi no-op.** Memaksa layar mati hanya bisa
+6. **`setDisplayPowerMode` menjadi no-op.** Memaksa layar mati hanya bisa
    dilakukan sistem.
-8. **Belum diuji di perangkat.** Seluruh kode Shizuku baru terverifikasi
+7. **Belum diuji di perangkat.** Seluruh kode Shizuku baru terverifikasi
    kompilasi, belum pernah dijalankan di HP sungguhan. Empat hal yang paling
    perlu diuji lebih dulu:
    - apakah `/data/local/tmp/databackup-bin` bisa dieksekusi shell
    - apakah shell bisa menulis ke kartu SD lewat `/storage/<uuid>`
    - apakah `bmgr` diterima untuk game dengan `allowBackup="false"`
    - apakah `find -empty -delete` dan `ls -p` tersedia di toybox perangkat
+
 
 
 
