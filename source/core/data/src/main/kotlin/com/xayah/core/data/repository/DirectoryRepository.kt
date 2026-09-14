@@ -1,6 +1,7 @@
 package com.xayah.core.data.repository
 
 import android.content.Context
+import android.os.StatFs
 import com.xayah.core.common.util.toSpaceString
 import com.xayah.core.data.R
 import com.xayah.core.database.dao.DirectoryDao
@@ -12,13 +13,16 @@ import com.xayah.core.datastore.saveBackupSavePath
 import com.xayah.core.model.StorageType
 import com.xayah.core.model.database.DirectoryEntity
 import com.xayah.core.model.database.DirectoryUpsertEntity
+import com.xayah.core.rootservice.parcelables.StatFsParcelable
 import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.rootservice.util.withIOContext
 import com.xayah.core.util.PathUtil
+import com.xayah.core.util.command.BaseUtil
 import com.xayah.core.util.command.PreparationUtil
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import java.io.File
 import javax.inject.Inject
 
 class DirectoryRepository @Inject constructor(
@@ -27,6 +31,68 @@ class DirectoryRepository @Inject constructor(
     private val packageDao: PackageDao,
     private val rootService: RemoteRootService,
 ) {
+    // ------------------------------------------------------------------
+    // Sumber data: root vs shell (Shizuku)
+    //
+    // Pembacaan ruang penyimpanan dan ukuran direktori dilakukan lewat daemon
+    // root saat root tersedia. Tanpa root, StatFs dan listing direktori bisa
+    // dikerjakan langsung oleh proses aplikasi, dan ukuran direktori dihitung
+    // shell lewat `du`.
+    // ------------------------------------------------------------------
+
+    private suspend fun listDirPaths(path: String): List<String> =
+        if (BaseUtil.isShizukuMode()) {
+            runCatching { File(path).listFiles()?.map { it.absolutePath } ?: emptyList() }
+                .getOrDefault(emptyList())
+        } else {
+            rootService.listFilePaths(path, listFiles = false)
+        }
+
+    /**
+     * Ruang kosong dan total sebuah direktori.
+     *
+     * `StatFs` bekerja untuk aplikasi biasa selama direktorinya terjangkau,
+     * jadi tidak perlu root.
+     */
+    private suspend fun statFsOf(path: String): StatFsParcelable =
+        if (BaseUtil.isShizukuMode()) {
+            runCatching {
+                val stat = StatFs(path)
+                StatFsParcelable(availableBytes = stat.availableBytes, totalBytes = stat.totalBytes)
+            }.getOrDefault(StatFsParcelable())
+        } else {
+            rootService.readStatFs(path)
+        }
+
+    /** Ukuran direktori dalam byte, dihitung shell lewat `du`. */
+    private suspend fun sizeOf(path: String): Long =
+        if (BaseUtil.isShizukuMode()) {
+            BaseUtil.execute("du", "-sk", path)
+                .out.firstOrNull()
+                ?.trim()
+                ?.split(Regex("\\s+"))
+                ?.firstOrNull()
+                ?.toLongOrNull()
+                ?.times(1024)
+                ?: 0L
+        } else {
+            rootService.calculateSize(path)
+        }
+
+    /**
+     * Jalur yang bisa dipakai untuk mengakses penyimpanan eksternal.
+     *
+     * Root memakai jalur mentah `/mnt/media_rw/<uuid>`. Tanpa root jalur itu
+     * tidak terjangkau — aplikasi dan shell hanya melihat volume yang sudah
+     * dipasang FUSE di `/storage/<uuid>`.
+     */
+    private fun externalAccessPath(rawPath: String): String =
+        if (BaseUtil.isShizukuMode() && rawPath.startsWith("/mnt/media_rw/")) {
+            rawPath.replace("/mnt/media_rw/", "/storage/")
+        } else {
+            rawPath
+        }
+
     fun queryActiveDirectoriesFlow(storageType: StorageType) = directoryDao.queryActiveDirectoriesFlow(storageType).distinctUntilChanged()
 
     /**
@@ -96,7 +162,7 @@ class DirectoryRepository @Inject constructor(
             directoryDao.updateActive(active = false)
 
             // Internal storage
-            val internalList = rootService.listFilePaths(ConstantUtil.STORAGE_EMULATED_PATH, listFiles = false)
+            val internalList = listDirPaths(ConstantUtil.STORAGE_EMULATED_PATH)
                 .filter { it.substring(it.lastIndexOf("/") + 1).toIntOrNull() != null }.toMutableList() // Just select 0 10 999 etc.
             if (internalList.contains(DEFAULT_PATH_PARENT).not()) {
                 internalList.add(DEFAULT_PATH_PARENT)
@@ -120,10 +186,10 @@ class DirectoryRepository @Inject constructor(
             directoryDao.upsert(internalDirs)
 
             // External storage
-            val externalList = PreparationUtil.listExternalStorage().out
+            val externalList = PreparationUtil.listExternalStorage().out.map { externalAccessPath(it) }
             val externalDirs = mutableListOf<DirectoryUpsertEntity>()
             for (storageItem in externalList) {
-                // e.g. /mnt/media_rw/E7F9-FA61
+                // e.g. /mnt/media_rw/E7F9-FA61 (root) atau /storage/E7F9-FA61 (shell)
                 runCatching {
                     val child = ConstantUtil.DEFAULT_PATH_CHILD
                     externalDirs.add(
@@ -147,16 +213,22 @@ class DirectoryRepository @Inject constructor(
             directoryDao.queryActiveDirectories().forEach { entity ->
                 val parent = entity.parent
                 entity.error = ""
-                val statFs = rootService.readStatFs(parent)
-                entity.childUsedBytes = rootService.calculateSize(entity.path)
+                val statFs = statFsOf(parent)
+                entity.childUsedBytes = sizeOf(entity.path)
                 entity.availableBytes = statFs.availableBytes
                 entity.totalBytes = statFs.totalBytes
                 if (entity.storageType == StorageType.EXTERNAL) {
                     val tags = mutableListOf<String>()
-                    val type = PreparationUtil.getExternalStorageType(parent).out.firstOrNull() ?: ""
+                    // Tabel mount memuat jalur mentah; jalur FUSE yang dipakai mode
+                    // shell tidak ada di sana, jadi pemeriksaan format dilewati.
+                    val type = if (BaseUtil.isShizukuMode()) {
+                        ""
+                    } else {
+                        PreparationUtil.getExternalStorageType(parent).out.firstOrNull() ?: ""
+                    }
                     tags.add(type)
                     // Check the format
-                    val supported = type.lowercase() in ConstantUtil.SupportedExternalStorageFormat
+                    val supported = type.isEmpty() || type.lowercase() in ConstantUtil.SupportedExternalStorageFormat
                     if (supported.not()) {
                         tags.add(context.getString(R.string.limited_4gb))
                         entity.error = "${context.getString(R.string.outdated_fs_warning)}\n\n" +
@@ -183,8 +255,8 @@ class DirectoryRepository @Inject constructor(
     suspend fun updateSelected() {
         withIOContext {
             directoryDao.querySelectedByDirectoryType()?.apply {
-                val statFs = rootService.readStatFs(parent)
-                childUsedBytes = rootService.calculateSize(path)
+                val statFs = statFsOf(parent)
+                childUsedBytes = sizeOf(path)
                 availableBytes = statFs.availableBytes
                 totalBytes = statFs.totalBytes
                 directoryDao.upsert(this)

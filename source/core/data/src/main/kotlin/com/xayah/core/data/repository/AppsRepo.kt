@@ -9,6 +9,7 @@ import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.LayerDrawable
 import android.os.Build
+import android.os.Process
 import android.os.UserHandle
 import android.widget.Toast
 import androidx.appcompat.content.res.AppCompatResources
@@ -38,6 +39,7 @@ import com.xayah.core.model.database.PackageEntity
 import com.xayah.core.model.database.PackageExtraInfo
 import com.xayah.core.model.database.PackageIndexInfo
 import com.xayah.core.model.database.PackageInfo
+import com.xayah.core.model.database.PackagePermission
 import com.xayah.core.model.database.PackageStorageStats
 import com.xayah.core.model.database.PackageUpdateEntity
 import com.xayah.core.model.database.asExternalModel
@@ -84,7 +86,7 @@ class AppsRepo @Inject constructor(
     fun getInstalledApps(users: Flow<List<UserInfo>>): Flow<Set<String>> = users.map { u ->
         val set = mutableSetOf<String>()
         u.forEach {
-            set.addAll(rootService.getInstalledPackagesAsUser(0, it.id).map { p -> "${p.packageName}-${it.id}" }.toSet())
+            set.addAll(installedPackages(it.id).map { p -> "${p.packageName}-${it.id}" }.toSet())
         }
         set
     }
@@ -199,7 +201,7 @@ class AppsRepo @Inject constructor(
         val loadSystemApps = context.readLoadSystemApps().first()
         val settings = settingsDataRepo.settingsData.first()
         val pm = context.packageManager
-        val userInfoList = rootService.getUsers()
+        val userInfoList = users()
         for (userInfo in userInfoList) {
             val userId = userInfo.id
             val installedPackages = getInstalledPackages(userId)
@@ -230,7 +232,7 @@ class AppsRepo @Inject constructor(
         val loadSystemApps = context.readLoadSystemApps().first()
         val settings = settingsDataRepo.settingsData.first()
         val pm = context.packageManager
-        val userInfoList = rootService.getUsers()
+        val userInfoList = users()
         for (userInfo in userInfoList) {
             val userId = userInfo.id
             val installedPackages = getInstalledPackages(userId).map { it.packageName }.toSet()
@@ -245,7 +247,7 @@ class AppsRepo @Inject constructor(
             val missingPackages = installedPackages.subtract(storedSet)
             missingPackages.forEachIndexed { index, pkg ->
                 onInit(index, missingPackages.size, pkg)
-                val info = rootService.getPackageInfoAsUser(pkg, 0, userId)
+                val info = packageInfo(pkg, 0, userId)
                 if (info != null) {
                     val isSystemApp = ((info.applicationInfo?.flags ?: 0) and ApplicationInfo.FLAG_SYSTEM) != 0
                     if (loadSystemApps || isSystemApp.not()) {
@@ -301,11 +303,11 @@ class AppsRepo @Inject constructor(
 
     suspend fun fullUpdate(onUpdate: suspend (cur: Int, max: Int, content: String) -> Unit) {
         val pm = context.packageManager
-        val userInfoList = rootService.getUsers()
+        val userInfoList = users()
         BaseUtil.mkdirs(context.iconDir())
         for (userInfo in userInfoList) {
             val userId = userInfo.id
-            val userHandle = rootService.getUserHandle(userId)
+            val userHandle = userHandleOf(userId)
             val apps = appsDao.queryPkgEntitiesByUserId(OpType.BACKUP, userId)
             val updateList = mutableListOf<PackageUpdateEntity>()
 
@@ -328,7 +330,7 @@ class AppsRepo @Inject constructor(
         apps.forEachIndexed { index, pkg ->
             onUpdate(index, apps.size, pkg.packageName)
             val userId = pkg.userId
-            val userHandle = rootService.getUserHandle(userId)
+            val userHandle = userHandleOf(userId)
             val updateEntity = updateApp(pm, pkg, userId, userHandle)
             if (updateEntity != null) {
                 updateList.add(updateEntity)
@@ -339,7 +341,7 @@ class AppsRepo @Inject constructor(
 
     suspend fun updateApp(pkg: PackageEntity, userId: Int) {
         val pm = context.packageManager
-        val userHandle = rootService.getUserHandle(userId)
+        val userHandle = userHandleOf(userId)
         val updateEntity = updateApp(pm, pkg, userId, userHandle)
         if (updateEntity != null) {
             appsDao.update(updateEntity)
@@ -347,7 +349,7 @@ class AppsRepo @Inject constructor(
     }
 
     private suspend fun updateApp(pm: PackageManager, pkg: PackageEntity, userId: Int, userHandle: UserHandle?): PackageUpdateEntity? {
-        val info = rootService.getPackageInfoAsUser(pkg.packageName, PackageManager.GET_PERMISSIONS, userId)
+        val info = packageInfo(pkg.packageName, PackageManager.GET_PERMISSIONS, userId)
         val updateEntity = PackageUpdateEntity(pkg.id, pkg.packageInfo, pkg.extraInfo, pkg.storageStats)
         if (info != null) {
             runCatching {
@@ -380,13 +382,19 @@ class AppsRepo @Inject constructor(
             updateEntity.extraInfo.firstUpdated = true
             val uid = info.applicationInfo?.uid ?: -1
             updateEntity.extraInfo.uid = uid
-            updateEntity.extraInfo.permissions = rootService.getPermissions(packageInfo = info)
+            updateEntity.extraInfo.permissions = permissionsOf(info)
             updateEntity.extraInfo.hasKeystore = PackageUtil.hasKeystore(context.readCustomSUFile().first(), uid)
-            updateEntity.extraInfo.ssaid = rootService.getPackageSsaidAsUser(packageName = info.packageName, uid = uid, userId = userId)
+            // SSAID tersimpan di /data/system/users/<id>/settings_ssaid.xml
+            // yang hanya bisa dibaca uid 0, jadi dilewati pada mode Shizuku.
+            updateEntity.extraInfo.ssaid = if (BaseUtil.isShizukuMode()) {
+                ""
+            } else {
+                rootService.getPackageSsaidAsUser(packageName = info.packageName, uid = uid, userId = userId)
+            }
             updateEntity.extraInfo.enabled = info.applicationInfo?.enabled ?: false
 
             if (userHandle != null) {
-                rootService.queryStatsForPackage(info, userHandle).also { stats ->
+                storageStats(info, userHandle).also { stats ->
                     if (stats != null) {
                         updateEntity.storageStats.appBytes = stats.appBytes
                         updateEntity.storageStats.cacheBytes = stats.cacheBytes
@@ -422,7 +430,105 @@ class AppsRepo @Inject constructor(
         }
     }
 
-    private suspend fun getInstalledPackages(userId: Int) = rootService.getInstalledPackagesAsUser(0, userId).filter {
+    // ------------------------------------------------------------------
+    // Sumber data: root vs shell (Shizuku)
+    //
+    // Saat root tersedia, query dilakukan lewat daemon root supaya bisa
+    // menjangkau semua pengguna perangkat sekaligus membaca data yang hanya
+    // bisa diakses uid 0.
+    //
+    // Tanpa root kita memakai API PackageManager biasa — setiap aplikasi
+    // boleh memanggilnya — dan membatasi diri ke pengguna yang sedang aktif.
+    // Untuk aplikasi backup game itu sudah cukup: yang dibackup adalah game
+    // milik pemilik perangkat, bukan game pengguna lain.
+    //
+    // Setiap helper di bawah ini memastikan rootService TIDAK PERNAH disentuh
+    // saat mode Shizuku aktif. Kalau disentuh, libsu akan mencoba membangun
+    // proses root dan gagal berulang kali.
+    // ------------------------------------------------------------------
+
+    /** Selisih uid antar pengguna pada Android. */
+    private val perUserRange = 100000
+
+    /** Pengguna yang sedang menjalankan aplikasi ini. */
+    private fun currentUserId(): Int = Process.myUid() / perUserRange
+
+    private suspend fun users(): List<UserInfo> =
+        if (BaseUtil.isShizukuMode()) {
+            listOf(UserInfo(id = currentUserId(), name = "Owner"))
+        } else {
+            // Dipetakan ulang supaya tipenya pasti UserInfo model, bukan tipe
+            // lain yang kebetulan bernama sama di lapisan rootservice.
+            rootService.getUsers().map { UserInfo(id = it.id, name = it.name) }
+        }
+
+    private suspend fun installedPackages(userId: Int): List<android.content.pm.PackageInfo> =
+        if (BaseUtil.isShizukuMode()) {
+            runCatching { context.packageManager.getInstalledPackages(0) }.getOrDefault(emptyList())
+        } else {
+            rootService.getInstalledPackagesAsUser(0, userId)
+        }
+
+    private suspend fun packageInfo(
+        packageName: String,
+        flags: Int,
+        userId: Int,
+    ): android.content.pm.PackageInfo? =
+        if (BaseUtil.isShizukuMode()) {
+            runCatching { context.packageManager.getPackageInfo(packageName, flags) }.getOrNull()
+        } else {
+            rootService.getPackageInfoAsUser(packageName, flags, userId)
+        }
+
+    private suspend fun userHandleOf(userId: Int): UserHandle? =
+        if (BaseUtil.isShizukuMode()) {
+            // Hanya pengguna aktif yang dijangkau; pengguna lain butuh hak istimewa.
+            Process.myUserHandle().takeIf { currentUserId() == userId }
+        } else {
+            rootService.getUserHandle(userId)
+        }
+
+    /**
+     * Daftar izin runtime sebuah paket.
+     *
+     * `requestedPermissionsFlags` sudah menandai mana yang benar-benar
+     * diberikan, jadi tidak perlu root. Kolom `op` dan `mode` (appops)
+     * dibiarkan kosong pada mode Shizuku karena membacanya butuh hak
+     * istimewa.
+     */
+    private suspend fun permissionsOf(info: android.content.pm.PackageInfo): List<PackagePermission> =
+        if (BaseUtil.isShizukuMode()) {
+            val requested = info.requestedPermissions ?: return emptyList()
+            val grantedFlags = info.requestedPermissionsFlags ?: IntArray(0)
+            requested.mapIndexedNotNull { index, name ->
+                if (name == null) {
+                    null
+                } else {
+                    PackagePermission(
+                        name = name,
+                        isGranted = (grantedFlags.getOrNull(index) ?: 0) and
+                            android.content.pm.PackageInfo.REQUESTED_PERMISSION_GRANTED != 0,
+                    )
+                }
+            }
+        } else {
+            rootService.getPermissions(packageInfo = info)
+        }
+
+    /**
+     * Ukuran penyimpanan sebuah paket.
+     *
+     * Butuh hak istimewa, jadi pada mode Shizuku dikembalikan kosong. Ukuran
+     * tetap terlihat dari perhitungan berkas saat backup dijalankan.
+     */
+    private suspend fun storageStats(info: android.content.pm.PackageInfo, userHandle: UserHandle?) =
+        if (BaseUtil.isShizukuMode()) {
+            null
+        } else {
+            userHandle?.let { rootService.queryStatsForPackage(info, it) }
+        }
+
+    private suspend fun getInstalledPackages(userId: Int) = installedPackages(userId).filter {
         // Filter itself
         it.packageName != context.packageName
     }.filter {
@@ -601,7 +707,7 @@ class AppsRepo @Inject constructor(
      */
     suspend fun launchApp(packageName: String, userId: Int) {
         val launcherApps = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
-        val user = rootService.getUserHandle(userId)
+        val user = userHandleOf(userId)
         if (launcherApps.isPackageEnabled(packageName, user).not()) {
             // Package not enabled
             withMainContext {
