@@ -19,15 +19,18 @@ import com.xayah.core.work.workers.FilesUpdateWorker
 
 object WorkManagerInitializer {
     /**
-     * Fully initialize at app startup
+     * Fully initialize at app startup.
+     *
+     * Fork ini hanya menangani game, jadi langkah-langkah untuk daftar berkas
+     * (FilesUpdateWorker dan FilesLoadWorker) tidak lagi dijalankan. Keduanya
+     * memindai direktori backup untuk mencari berkas media yang tidak pernah
+     * ditampilkan lagi.
      */
     fun fullInitialize(context: Context, regular: Boolean = true) {
         WorkManager.getInstance(context)
             .beginUniqueWork(FULL_INIT_WORK_NAME, ExistingWorkPolicy.KEEP, AppsInitWorker.buildRequest())
             .then(AppsUpdateWorker.buildRequest(regular))
-            .then(FilesUpdateWorker.buildRequest())
             .then(AppsLoadWorker.buildRequest(null))
-            .then(FilesLoadWorker.buildRequest(null))
             .enqueue()
     }
 
