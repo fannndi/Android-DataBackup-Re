@@ -402,9 +402,32 @@ class AppsRepo @Inject constructor(
         }
     }
 
+    /**
+     * Fork ini fokus pada game saja.
+     *
+     * Penanda game di Android ada dua dan keduanya dipakai di lapangan:
+     * - `android:isGame="true"`  -> ApplicationInfo.FLAG_IS_GAME
+     * - `android:appCategory="game"` -> ApplicationInfo.category (API 26+)
+     *
+     * Aplikasi non-game disaring di sini, yaitu di sumber datanya, sehingga
+     * tidak pernah masuk database dan tidak pernah muncul di daftar backup.
+     */
+    private fun android.content.pm.PackageInfo.isGameApp(): Boolean {
+        val appInfo = applicationInfo ?: return false
+        if ((appInfo.flags and ApplicationInfo.FLAG_IS_GAME) != 0) return true
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            appInfo.category == ApplicationInfo.CATEGORY_GAME
+        } else {
+            false
+        }
+    }
+
     private suspend fun getInstalledPackages(userId: Int) = rootService.getInstalledPackagesAsUser(0, userId).filter {
         // Filter itself
         it.packageName != context.packageName
+    }.filter {
+        // Filter non-games
+        it.isGameApp()
     }
 
     suspend fun load(cloudName: String?, onLoad: suspend (cur: Int, max: Int, content: String) -> Unit) {

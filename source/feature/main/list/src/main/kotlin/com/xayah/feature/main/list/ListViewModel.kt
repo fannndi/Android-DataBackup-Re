@@ -125,22 +125,8 @@ class ListViewModel @Inject constructor(
                 }
             }
 
-            Target.Files -> {
-                when (opType) {
-                    OpType.BACKUP -> {
-                        navController.navigateSingle(MainRoutes.MediumBackupProcessingGraph.route)
-                    }
-
-                    OpType.RESTORE -> {
-                        navController.navigateSingle(
-                            MainRoutes.MediumRestoreProcessingGraph.getRoute(
-                                cloudName = cloudName.ifEmptyEncodeURLWithSpace(),
-                                backupDir = backupDir.ifEmptyEncodeURLWithSpace()
-                            )
-                        )
-                    }
-                }
-            }
+            // Backup berkas/media sudah dihapus dari fork ini — hanya game (Apps).
+            Target.Files -> {}
         }
     }
 }

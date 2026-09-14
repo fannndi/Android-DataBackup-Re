@@ -88,71 +88,6 @@ fun PageRestore() {
                 lastRestoreTime = lastRestoreTime
             )
 
-            var enabled by remember { mutableStateOf(true) }
-            val storageOptions = remember { listOf(context.getString(R.string.local), context.getString(R.string.cloud)) }
-            SingleChoiceSegmentedButtonRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .paddingHorizontal(SizeTokens.Level16)
-                    .paddingBottom(SizeTokens.Level16),
-            ) {
-                storageOptions.forEachIndexed { index, label ->
-                    SegmentedButton(
-                        enabled = enabled,
-                        shape = SegmentedButtonDefaults.itemShape(index = index, count = storageOptions.size),
-                        onClick = {
-                            viewModel.launchOnIO {
-                                enabled = false
-                                viewModel.emitState(state = uiState.copy(storageIndex = index, storageType = if (index == 0) StorageMode.Local else StorageMode.Cloud))
-                                viewModel.emitIntent(IndexUiIntent.UpdateApps)
-                                viewModel.emitIntent(IndexUiIntent.UpdateFiles)
-                                enabled = true
-                            }
-                        },
-                        selected = index == uiState.storageIndex
-                    ) {
-                        Text(label)
-                    }
-                }
-            }
-
-            AnimatedVisibility(uiState.storageIndex == 1) {
-                if (accounts.isEmpty()) {
-                    Clickable(
-                        title = stringResource(id = R.string.account),
-                        value = stringResource(id = R.string.no_available_account),
-                        leadingIcon = ImageVector.vectorResource(id = R.drawable.ic_rounded_cancel_circle),
-                        trailingIcon = Icons.Rounded.KeyboardArrowRight,
-                    ) {
-                        navController.navigateSingle(MainRoutes.Cloud.route)
-                    }
-                } else {
-                    val dialogState = LocalSlotScope.current!!.dialogSlot
-                    var currentIndex by remember { mutableIntStateOf(if (uiState.cloudEntity == null) 0 else accounts.indexOfFirst { it.title == uiState.cloudEntity!!.name }) }
-                    LaunchedEffect(currentIndex) {
-                        viewModel.emitIntentOnIO(IndexUiIntent.SetCloudEntity(name = accounts[currentIndex].title))
-                    }
-                    Selectable(
-                        title = stringResource(id = R.string.account),
-                        leadingIcon = uiState.cloudEntity?.type?.icon ?: ImageVector.vectorResource(id = R.drawable.ic_rounded_person),
-                        value = if (uiState.cloudEntity == null) stringResource(id = R.string.choose_an_account) else accounts[currentIndex].desc
-                            ?: stringResource(id = R.string.unknown),
-                        current = if (uiState.cloudEntity == null) stringResource(id = R.string.not_selected) else accounts[currentIndex].title
-                    ) {
-                        viewModel.launchOnIO {
-                            val (state, selectedIndex) = dialogState.select(
-                                title = context.getString(R.string.account),
-                                defIndex = currentIndex,
-                                items = accounts
-                            )
-                            if (state.isConfirm) {
-                                currentIndex = selectedIndex
-                            }
-                        }
-                    }
-                }
-            }
-
             val appsInteractionSource = remember { MutableInteractionSource() }
             Clickable(
                 title = stringResource(id = R.string.apps),
@@ -167,18 +102,6 @@ fun PageRestore() {
                 }
             ) {
                 viewModel.emitIntentOnIO(IndexUiIntent.ToAppList(navController))
-            }
-
-            val filesInteractionSource = remember { MutableInteractionSource() }
-            Clickable(
-                title = stringResource(id = R.string.files),
-                value = if (uiState.medium.isEmpty()) null else
-                    "${context.getString(R.string.args_files_backed_up, uiState.medium.size)}${if (uiState.mediumSize.isNotEmpty()) " (${uiState.mediumSize})" else ""}"
-                ,
-                leadingIcon = ImageVector.vectorResource(id = R.drawable.ic_rounded_folder_open),
-                interactionSource = filesInteractionSource,
-            ) {
-                viewModel.emitIntentOnIO(IndexUiIntent.ToFileList(navController))
             }
 
             Title(title = stringResource(id = R.string.advanced)) {

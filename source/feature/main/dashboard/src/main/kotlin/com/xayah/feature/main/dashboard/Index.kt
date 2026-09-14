@@ -154,17 +154,6 @@ fun PageDashboard() {
                     ) {
                         navController.navigateSingle(MainRoutes.List.getRoute(target = Target.Apps, opType = OpType.BACKUP))
                     }
-                    QuickActionsButton(
-                        modifier = Modifier.weight(1f),
-                        enabled = nullBackupDir.not(),
-                        title = stringResource(id = R.string.backup_files),
-                        icon = ImageVector.vectorResource(id = R.drawable.ic_rounded_acute),
-                        colorContainer = ThemedColorSchemeKeyTokens.YellowPrimaryContainer,
-                        colorL80D20 = ThemedColorSchemeKeyTokens.YellowL80D20,
-                        onColorContainer = ThemedColorSchemeKeyTokens.YellowOnPrimaryContainer
-                    ) {
-                        navController.navigateSingle(MainRoutes.List.getRoute(target = Target.Files, opType = OpType.BACKUP))
-                    }
                     // TODO MMS/SMS, Contacts backup/restore
 //                    QuickActionsButton(
 //                        modifier = Modifier.weight(1f),
@@ -184,18 +173,6 @@ fun PageDashboard() {
 //                        colorL80D20 = ThemedColorSchemeKeyTokens.GreenL80D20,
 //                        onColorContainer = ThemedColorSchemeKeyTokens.GreenOnPrimaryContainer
 //                    )
-                    QuickActionsButton(
-                        modifier = Modifier.weight(1f),
-                        enabled = nullBackupDir.not(),
-                        title = stringResource(id = R.string.cloud),
-                        icon = Icons.Outlined.Cloud,
-                        colorContainer = ThemedColorSchemeKeyTokens.PurplePrimaryContainer,
-                        colorL80D20 = ThemedColorSchemeKeyTokens.PurpleL80D20,
-                        onColorContainer = ThemedColorSchemeKeyTokens.PurpleOnPrimaryContainer,
-                        actionIcon = Icons.Rounded.KeyboardArrowRight
-                    ) {
-                        navController.navigateSingle(MainRoutes.Cloud.route)
-                    }
                     QuickActionsButton(
                         modifier = Modifier.weight(1f),
                         enabled = nullBackupDir.not(),

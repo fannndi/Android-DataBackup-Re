@@ -29,10 +29,27 @@ class DirectoryRepository @Inject constructor(
 ) {
     fun queryActiveDirectoriesFlow(storageType: StorageType) = directoryDao.queryActiveDirectoriesFlow(storageType).distinctUntilChanged()
 
-    private suspend fun resetDir() = selectDir(
-        path = ConstantUtil.DEFAULT_PATH,
-        id = directoryDao.queryDefaultDirectoryId(StorageType.INTERNAL),
-    )
+    /**
+     * Fork ini mengutamakan kartu SD sebagai lokasi backup.
+     *
+     * Kalau ada penyimpanan eksternal yang aktif, pilih itu sebagai default
+     * supaya backup tidak menumpuk di penyimpanan internal. Kalau tidak ada
+     * kartu SD, kembali ke penyimpanan internal seperti semula.
+     *
+     * Pengguna tetap bisa menggantinya lewat pemilih folder.
+     */
+    private suspend fun resetDir() {
+        val external = directoryDao.queryActiveDirectories()
+            .firstOrNull { it.storageType == StorageType.EXTERNAL && it.enabled }
+        if (external != null) {
+            selectDir(path = external.path, id = external.id)
+        } else {
+            selectDir(
+                path = ConstantUtil.DEFAULT_PATH,
+                id = directoryDao.queryDefaultDirectoryId(StorageType.INTERNAL),
+            )
+        }
+    }
 
     suspend fun deleteDir(entity: DirectoryEntity) = run {
         if (entity.selected) resetDir()
