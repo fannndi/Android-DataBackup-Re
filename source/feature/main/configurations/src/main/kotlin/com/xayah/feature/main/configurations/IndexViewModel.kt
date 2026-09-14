@@ -2,7 +2,6 @@ package com.xayah.feature.main.configurations
 
 import android.content.Context
 import androidx.compose.material3.ExperimentalMaterial3Api
-import com.xayah.core.data.repository.CloudRepository
 import com.xayah.core.data.repository.LabelsRepo
 import com.xayah.core.data.repository.MediaRepository
 import com.xayah.core.data.repository.PackageRepository
@@ -10,7 +9,6 @@ import com.xayah.core.datastore.ConstantUtil
 import com.xayah.core.model.CompressionType
 import com.xayah.core.model.Configurations
 import com.xayah.core.model.OpType
-import com.xayah.core.model.database.CloudEntity
 import com.xayah.core.model.database.LabelAppCrossRefEntity
 import com.xayah.core.model.database.LabelEntity
 import com.xayah.core.model.database.LabelFileCrossRefEntity
@@ -49,8 +47,6 @@ import javax.inject.Inject
 data class IndexUiState(
     val selectedCount: Int,
     val blacklistSelected: Boolean,
-    val cloudSelected: Boolean,
-    val fileSelected: Boolean,
     val labelSelected: Boolean,
 ) : UiState
 
@@ -65,17 +61,14 @@ class IndexViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val rootService: RemoteRootService,
     private val packageRepo: PackageRepository,
-    private val cloudRepo: CloudRepository,
     private val mediaRepo: MediaRepository,
     private val labelsRepo: LabelsRepo,
     private val commonBackupUtil: CommonBackupUtil,
     private val pathUtil: PathUtil,
 ) : BaseViewModel<IndexUiState, IndexUiIntent, IndexUiEffect>(
     IndexUiState(
-        selectedCount = 4,
+        selectedCount = 2,
         blacklistSelected = true,
-        cloudSelected = true,
-        fileSelected = true,
         labelSelected = true,
     )
 ) {
@@ -104,29 +97,6 @@ class IndexViewModel @Inject constructor(
                                         title = joinOf(
                                             context.getString(R.string.blacklist),
                                             " (${appsCount + filesCount})",
-                                        )
-                                    )
-                                )
-                            }
-                        }.withLog()
-                        runCatching {
-                            if (config.cloud.isNotEmpty()) {
-                                items.add(
-                                    DialogCheckBoxItem(
-                                        enum = ConstantUtil.CONFIGURATIONS_KEY_CLOUD,
-                                        title = joinOf(context.getString(R.string.cloud), " (${config.cloud.size})")
-                                    )
-                                )
-                            }
-                        }.withLog()
-                        runCatching {
-                            if (config.file.isNotEmpty()) {
-                                items.add(
-                                    DialogCheckBoxItem(
-                                        enum = ConstantUtil.CONFIGURATIONS_KEY_FILE,
-                                        title = joinOf(
-                                            context.getString(R.string.files),
-                                            " (${config.file.size})",
                                         )
                                     )
                                 )
@@ -241,18 +211,6 @@ class IndexViewModel @Inject constructor(
                                             }
                                         }
 
-                                        ConstantUtil.CONFIGURATIONS_KEY_CLOUD -> {
-                                            if (config?.cloud != null) {
-                                                cloudRepo.upsert(config.cloud)
-                                            }
-                                        }
-
-                                        ConstantUtil.CONFIGURATIONS_KEY_FILE -> {
-                                            if (config?.file != null) {
-                                                mediaRepo.addMedia(config.file.map { it.path })
-                                            }
-                                        }
-
                                         ConstantUtil.CONFIGURATIONS_KEY_LABEL -> {
                                             if (config?.labels != null) {
                                                 labelsRepo.addLabels(config.labels)
@@ -282,15 +240,6 @@ class IndexViewModel @Inject constructor(
 
     private val _blockedPackages: Flow<List<PackageEntity>> = packageRepo.queryPackagesFlow(opType = OpType.BACKUP, blocked = true).flowOnIO()
     val blockedPackagesState: StateFlow<List<PackageEntity>> = _blockedPackages.stateInScope(listOf())
-
-    private val _blockedFiles: Flow<List<MediaEntity>> = mediaRepo.queryFlow(opType = OpType.BACKUP, blocked = true).flowOnIO()
-    val blockedFilesState: StateFlow<List<MediaEntity>> = _blockedFiles.stateInScope(listOf())
-
-    private val _accounts: Flow<List<CloudEntity>> = cloudRepo.clouds.flowOnIO()
-    val accounts: StateFlow<List<CloudEntity>> = _accounts.stateInScope(listOf())
-
-    private val _files: Flow<List<MediaEntity>> = mediaRepo.queryFlow(opType = OpType.BACKUP, blocked = false).flowOnIO()
-    val files: StateFlow<List<MediaEntity>> = _files.stateInScope(listOf())
 
     private val _labels: Flow<List<LabelEntity>> = labelsRepo.getLabelsFlow().flowOnIO()
     private val _labelAppRefs: Flow<List<LabelAppCrossRefEntity>> = labelsRepo.getAppRefsFlow().flowOnIO()
