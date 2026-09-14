@@ -40,6 +40,19 @@
                 android:value="true" />
         </service>
 
+        <!--
+            Provider Shizuku. Diperlukan agar Shizuku bisa mengirimkan binder-nya
+            ke aplikasi ini. android:permission melindungi provider dari akses
+            aplikasi lain.
+        -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
         <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"

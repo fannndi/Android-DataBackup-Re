@@ -2,6 +2,7 @@ package com.xayah.feature.setup.page.one
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import androidx.compose.material3.ExperimentalMaterial3Api
 import com.topjohnwu.superuser.Shell
@@ -12,6 +13,7 @@ import com.xayah.core.ui.viewmodel.UiIntent
 import com.xayah.core.ui.viewmodel.UiState
 import com.xayah.core.util.NotificationUtil
 import com.xayah.core.util.command.BaseUtil
+import com.xayah.core.util.command.ShizukuShell
 import com.xayah.core.util.withLog
 import com.xayah.feature.setup.EnvState
 import com.xayah.feature.setup.R
@@ -23,6 +25,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import rikka.shizuku.Shizuku
 import javax.inject.Inject
 
 data class IndexUiState(
@@ -65,7 +68,9 @@ class IndexViewModel @Inject constructor(
                             // Kill daemon
                             BaseUtil.kill(context, "${context.packageName}:root:daemon")
                         }.withLog()
-                        _rootState.value = if (runCatching { Shell.getShell().isRoot }.getOrElse { false }) EnvState.Succeed else EnvState.Failed
+
+                        val hasRoot = runCatching { Shell.getShell().isRoot }.getOrElse { false }
+                        _rootState.value = if (hasRoot) EnvState.Succeed else validateShizuku()
                     }
                 }
             }
@@ -110,6 +115,52 @@ class IndexViewModel @Inject constructor(
     }
 
     private val mutex = Mutex()
+
+    private var permissionListenerRegistered = false
+
+    private val permissionListener = Shizuku.OnRequestPermissionResultListener { _, grantResult ->
+        if (grantResult == PackageManager.PERMISSION_GRANTED) {
+            emitIntentOnIO(IndexUiIntent.ValidateRoot)
+        }
+    }
+
+    /**
+     * Jalur tanpa root.
+     *
+     * Shizuku memberi kita uid 2000 (shell). Kalau izinnya belum ada, kita
+     * minta dulu; [permissionListener] akan memicu validasi ulang begitu
+     * pengguna menekan "Allow", sehingga pengguna cukup menekan sekali.
+     *
+     * Mengembalikan [EnvState.Idle] saat izin masih menunggu supaya tombolnya
+     * bisa ditekan lagi kalau dialognya tertutup.
+     */
+    private suspend fun validateShizuku(): EnvState {
+        if (ShizukuShell.isAvailable().not()) return EnvState.Failed
+
+        if (ShizukuShell.hasPermission().not()) {
+            ensurePermissionListener()
+            ShizukuShell.requestPermission()
+            return EnvState.Idle
+        }
+
+        return if (BaseUtil.initializeShizukuMode(context = context)) EnvState.Succeed else EnvState.Failed
+    }
+
+    private fun ensurePermissionListener() {
+        if (permissionListenerRegistered) return
+        // Pendaftaran gagal kalau binder Shizuku belum diterima; dicoba lagi
+        // pada pemanggilan berikutnya.
+        permissionListenerRegistered = runCatching {
+            Shizuku.addRequestPermissionResultListener(permissionListener)
+        }.isSuccess
+    }
+
+    override fun onCleared() {
+        if (permissionListenerRegistered) {
+            runCatching { Shizuku.removeRequestPermissionResultListener(permissionListener) }
+        }
+        super.onCleared()
+    }
 
     private val _rootState: MutableStateFlow<EnvState> = MutableStateFlow(EnvState.Idle)
     val rootState: StateFlow<EnvState> = _rootState.stateInScope(EnvState.Idle)

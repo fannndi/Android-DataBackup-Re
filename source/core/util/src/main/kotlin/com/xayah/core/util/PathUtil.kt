@@ -2,7 +2,9 @@ package com.xayah.core.util
 
 import android.annotation.SuppressLint
 import android.content.Context
+import com.xayah.core.datastore.ConstantUtil
 import com.xayah.core.datastore.readBackupSavePath
+import com.xayah.core.util.command.BaseUtil
 import com.xayah.core.util.command.SELinux
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.first
@@ -58,9 +60,31 @@ class PathUtil @Inject constructor(
         fun getPackageUserDir(userId: Int): String = "/data/user/${userId}"
         fun getPackageUserDeDir(userId: Int): String = "/data/user_de/${userId}"
         fun getDataMediaDir(): String = "/data/media"
-        fun getPackageDataDir(userId: Int): String = "${getDataMediaDir()}/${userId}/Android/data"
-        fun getPackageObbDir(userId: Int): String = "${getDataMediaDir()}/${userId}/Android/obb"
-        fun getPackageMediaDir(userId: Int): String = "${getDataMediaDir()}/${userId}/Android/media"
+
+        /**
+         * Akar direktori eksternal per pengguna: `Android/data`, `Android/obb`,
+         * dan `Android/media` berada di bawah sini.
+         *
+         * Saat berjalan sebagai root, jalur mentah `/data/media/<id>` dipakai
+         * karena lebih langsung dan menghindari lapisan FUSE.
+         *
+         * Saat berjalan sebagai shell (Shizuku), jalur itu tertutup:
+         * `/data/media` ber-mode `0770` milik `media_rw`, sedangkan shell tidak
+         * ada di grup itu. Shell hanya punya akses lewat grup `ext_data_rw` /
+         * `ext_obb_rw` pada jalur FUSE `/storage/emulated/<id>`.
+         *
+         * Karena itu jalur harus mengikuti mode eksekusi yang sedang aktif.
+         */
+        private fun androidExternalRoot(userId: Int): String =
+            if (BaseUtil.isShizukuMode()) {
+                "${ConstantUtil.STORAGE_EMULATED_PATH}/${userId}/Android"
+            } else {
+                "${getDataMediaDir()}/${userId}/Android"
+            }
+
+        fun getPackageDataDir(userId: Int): String = "${androidExternalRoot(userId)}/data"
+        fun getPackageObbDir(userId: Int): String = "${androidExternalRoot(userId)}/obb"
+        fun getPackageMediaDir(userId: Int): String = "${androidExternalRoot(userId)}/media"
 
         fun getPackageIconRelativePath(packageName: String): String = "${packageName}.png"
         fun getPackageAdaptiveIconRelativePath(packageName: String): String = "adaptive@${getPackageIconRelativePath(packageName)}"

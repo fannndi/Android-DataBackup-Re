@@ -148,6 +148,9 @@ dependencies {
     // libsu
     implementation(libs.libsu.core)
 
+    // Shizuku — provider diperlukan agar binder Shizuku diterima aplikasi
+    implementation(libs.shizuku.provider)
+
     // BountyCastle
     implementation(libs.bountycastle)
 }

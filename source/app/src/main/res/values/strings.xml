@@ -223,8 +223,8 @@
     <string name="_continue">Continue</string>
     <string name="app_short_desc">Free and open-source data backup application</string>
     <string name="required">Required</string>
-    <string name="root_permission">Root permission</string>
-    <string name="root_permission_desc">Backup and restore app data</string>
+    <string name="root_permission">Root or Shizuku</string>
+    <string name="root_permission_desc">Backup and restore game data without rooting your phone</string>
     <string name="abi_validation_desc">Validate if your device is supported</string>
     <string name="optional">Optional</string>
     <string name="notification_permission">Notification permission</string>

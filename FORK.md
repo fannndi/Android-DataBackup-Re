@@ -101,12 +101,68 @@ Konstanta transport yang disediakan: `TRANSPORT_LOCAL`, `TRANSPORT_CLOUD`,
 Unit test untuk pengurai token ada di
 `core/util/src/test/kotlin/com/xayah/core/util/command/BmgrUtilTest.kt`.
 
+### 6. Dukungan Shizuku — berjalan sebagai uid 2000 tanpa root
+
+`core/util/.../command/ShizukuShell.kt` (baru) — backend eksekusi perintah
+lewat Shizuku:
+
+| Fungsi | Kegunaan |
+|---|---|
+| `isAvailable()` | Shizuku terpasang dan servernya hidup |
+| `hasPermission()` | Binder diterima dan izin diberikan |
+| `requestPermission()` | Meminta izin ke pengguna |
+| `serverUid()` / `isShellMode()` | `2000` = shell, `0` = perangkat di-root |
+| `exec(cmd, timeout)` | Menjalankan perintah sebagai shell |
+| `stageBinaries(context)` | Menyinggahkan binary bawaan aplikasi |
+
+Dependensi: `dev.rikka.shizuku:api:13.1.5` dan `:provider:13.1.5`.
+`ShizukuProvider` didaftarkan di `app/src/main/AndroidManifest.xml`.
+
+#### Kenapa binary perlu disinggahkan
+
+Aplikasi membawa `busybox`, `tar`, dan `zstd` di `filesDir` privatnya.
+Direktori privat aplikasi ber-mode `0700` milik uid aplikasi, sehingga
+**shell tidak bisa menembusnya** — binary itu jadi tidak terjangkau, meskipun
+berkasnya sendiri sudah world-executable.
+
+Alurnya dua langkah:
+
+1. Aplikasi mengekstrak `bin.zip` ke direktori eksternalnya sendiri
+   (`/storage/emulated/0/Android/data/<pkg>/files/shell-bin`) — shell bisa
+   membacanya lewat grup `ext_data_rw`
+2. Shell menyalinnya ke `/data/local/tmp/databackup-bin` dan memberi bit
+   eksekusi; direktori itu jadi bagian terdepan `PATH`
+
+#### Cara mengaktifkan
+
+`BaseUtil.initializeShizukuMode(context)` dipanggil setelah izin diberikan.
+Sejak itu `BaseUtil.execute()` otomatis memakai `ShizukuShell`, bukan libsu.
+Kalau root tersedia, jalur libsu tetap dipakai karena lebih lengkap.
+
+Di halaman setup, tombol "Root or Shizuku" sekarang mencoba root lebih dulu
+lalu jatuh ke Shizuku. `IndexViewModel` mendaftarkan listener hasil izin
+sehingga pengguna cukup menekan sekali.
+
+### 7. Path Android/data dan obb menyesuaikan mode
+
+`core/util/.../PathUtil.kt` — akar direktori eksternal sekarang bergantung
+pada mode eksekusi:
+
+| Mode | Akar | Alasan |
+|---|---|---|
+| root | `/data/media/<id>/Android` | lebih langsung, tanpa lapisan FUSE |
+| shell | `/storage/emulated/<id>/Android` | `/data/media` ber-mode `0770` milik `media_rw`, shell tidak ada di grup itu |
+
+Shell hanya punya akses ke `Android/data` dan `Android/obb` lewat grup
+`ext_data_rw` / `ext_obb_rw` pada jalur FUSE. Tanpa penyesuaian ini, backup
+data eksternal game akan gagal walau Shizuku sudah aktif.
+
 ---
 
 ## Yang belum dikerjakan
 
-Ini penting supaya ekspektasinya jelas. Perubahan di atas menghapus fitur dari
-**UI dan modulnya**, tetapi lapisan data masih menyimpan kode mati:
+Perubahan di atas menghapus fitur dari **UI dan modulnya**, dan sudah
+menyediakan backend Shizuku. Yang masih tersisa:
 
 1. **`core/network`** (SMB/SFTP/FTP/WebDAV) masih ada. Masih dipakai
    `CloudRepository`, yang masih di-inject ke `AppsRepo`, `PackageRepository`,
@@ -123,9 +179,13 @@ Ini penting supaya ekspektasinya jelas. Perubahan di atas menghapus fitur dari
    berikutnya: menjadikannya sumber `DataType` baru (mis. `PACKAGE_PRIVATE_BMGR`)
    dengan migrasi Room, tombol di layar detail game, dan alur restore
    `pm clear` → `bmgr restore` → `bmgr run`.
-5. **libsu masih dipakai** dan masih butuh root. Penggantian ke Shizuku
-   (`Shizuku.newProcess`, `Shizuku.bindUserService`) belum dilakukan. Pemetaan
-   lengkapnya ada di `tools/game-backup/README.md`.
+5. **`RemoteRootService` masih memakai libsu `RootService`.** Operasi yang
+   bergantung padanya (query `PackageManager` versi hidden, statistik
+   penyimpanan, SSAID) belum punya padanan Shizuku. Untuk mode shell, sebagian
+   di antaranya bisa dialihkan ke `pm`/`dumpsys` biasa.
+6. **Belum diuji di perangkat.** Seluruh kode Shizuku baru terverifikasi
+   kompilasi, belum pernah dijalankan di HP sungguhan.
+
 
 ---
 

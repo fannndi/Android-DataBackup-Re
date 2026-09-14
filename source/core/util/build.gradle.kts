@@ -23,6 +23,9 @@ dependencies {
     // libsu
     implementation(libs.libsu.core)
 
+    // Shizuku
+    implementation(libs.shizuku.api)
+
     // zip4j
     implementation(libs.zip4j)
 

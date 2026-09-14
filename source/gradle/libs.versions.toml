@@ -27,6 +27,7 @@ navigation-compose = "2.8.5"
 okhttp = "4.12.0"
 retrofit = "2.9.0"
 libsu = "6.0.0"
+shizuku = "13.1.5"
 work-manager = "2.10.0"
 zip4j = "2.11.5"
 kotlinx-coroutines-core-jvm = "1.8.0"
@@ -103,6 +104,10 @@ retrofit = { module = "com.squareup.retrofit2:retrofit", version.ref = "retrofit
 retrofit-converter-gson = { module = "com.squareup.retrofit2:converter-gson", version.ref = "retrofit" }
 libsu-core = { module = "com.github.topjohnwu.libsu:core", version.ref = "libsu" }
 libsu-service = { module = "com.github.topjohnwu.libsu:service", version.ref = "libsu" }
+# Shizuku: menjalankan perintah sebagai uid 2000 (shell) tanpa root.
+# `api` membawa serta `aidl` dan `shared` sebagai dependensi transitif.
+shizuku-api = { module = "dev.rikka.shizuku:api", version.ref = "shizuku" }
+shizuku-provider = { module = "dev.rikka.shizuku:provider", version.ref = "shizuku" }
 zip4j = { module = "net.lingala.zip4j:zip4j", version.ref = "zip4j" }
 google-services = { module = "com.google.gms:google-services", version.ref = "google-services" }
 firebase-crashlytics-gradle = { module = "com.google.firebase:firebase-crashlytics-gradle", version.ref = "firebase-crashlytics-gradle" }

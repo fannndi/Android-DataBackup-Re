@@ -55,6 +55,32 @@ private class EnvInitializer : Shell.Initializer() {
 }
 
 object BaseUtil {
+    /**
+     * True kalau perintah dijalankan lewat Shizuku (uid 2000) alih-alih `su`.
+     *
+     * Diaktifkan oleh [initializeShizukuMode] setelah pengguna memberi izin.
+     * Selama masih false, perilakunya sama seperti sebelumnya: lewat libsu.
+     */
+    @Volatile
+    private var shizukuMode = false
+
+    fun isShizukuMode(): Boolean = shizukuMode
+
+    /**
+     * Mengalihkan eksekusi perintah ke Shizuku.
+     *
+     * Perlu menyinggahkan binary bawaan aplikasi lebih dulu karena direktori
+     * privat aplikasi tidak bisa ditembus uid 2000. Lihat [ShizukuShell].
+     *
+     * @return true kalau Shizuku siap dipakai
+     */
+    suspend fun initializeShizukuMode(context: Context): Boolean {
+        if (ShizukuShell.hasPermission().not()) return false
+        val ready = ShizukuShell.stageBinaries(context)
+        shizukuMode = ready
+        return ready
+    }
+
     private suspend fun getShellBuilder(context: Context) = Shell.Builder.create()
         .setFlags(Shell.FLAG_MOUNT_MASTER or Shell.FLAG_REDIRECT_STDERR)
         .setInitializers(EnvInitializer::class.java)
@@ -80,9 +106,17 @@ object BaseUtil {
         }
 
         if (shell == null) {
-            Shell.cmd(shellResult.inputString).exec().also { result ->
-                shellResult.code = result.code
-                shellResult.out = result.out
+            if (shizukuMode) {
+                // Tanpa root: perintah dijalankan sebagai uid 2000 lewat Shizuku.
+                ShizukuShell.exec(shellResult.inputString).also { result ->
+                    shellResult.code = result.code
+                    shellResult.out = result.out
+                }
+            } else {
+                Shell.cmd(shellResult.inputString).exec().also { result ->
+                    shellResult.code = result.code
+                    shellResult.out = result.out
+                }
             }
         } else {
             val outList = mutableListOf<String>()
@@ -123,6 +157,12 @@ object BaseUtil {
     }
 
     suspend fun kill(context: Context, vararg keys: String) {
+        if (shizukuMode) {
+            // Tidak ada daemon root untuk dimatikan saat berjalan sebagai shell.
+            log { "kill" to "Dilewati: mode Shizuku tidak punya daemon root." }
+            return
+        }
+
         val shell = getNewShell(context)
         if (shell != null) {
             // ps -A | grep -w $key1 | grep -w $key2 | ... | awk 'NF>1{print $1}' | xargs kill -9
@@ -141,6 +181,19 @@ object BaseUtil {
     }
 
     suspend fun killPackage(context: Context, userId: Int, packageName: String) {
+        if (shizukuMode) {
+            // `pm force-stop` dan `am force-stop` bisa dijalankan sebagai shell.
+            // `killall` tetap dicoba; kalau tidak diizinkan, tidak masalah.
+            val cmd = """
+                killall -9 "$packageName" &>/dev/null
+                am force-stop --user "$userId" "$packageName" &>/dev/null
+                am kill "$packageName" &>/dev/null
+                true
+            """.trimIndent()
+            execute(cmd)
+            return
+        }
+
         val shell = getNewShell(context)
         if (shell != null) {
             val cmd = """
