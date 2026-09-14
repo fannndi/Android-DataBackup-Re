@@ -185,40 +185,75 @@ membangun proses root berulang kali.
 `StatFs` dan `PackageManager` bekerja untuk aplikasi biasa, jadi keduanya tidak
 butuh hak istimewa sama sekali.
 
+### 9. Operasi berkas lewat shell
+
+`core/rootservice/.../util/ShellFileOps.kt` (baru) — padanan seluruh operasi
+berkas `RemoteRootService` memakai perintah shell biasa:
+
+| Operasi | Perintah |
+|---|---|
+| `mkdirs` | `mkdir -p` |
+| `exists` | `test -e` |
+| `createNewFile` | `touch` |
+| `deleteRecursively` | `rm -rf` |
+| `renameTo` | `mv` |
+| `copyTo` / `copyRecursively` | `cp` / `cp -R` (`-n` bila tidak menimpa) |
+| `listFilePaths` | `ls -1 -p` (satu pemanggilan, garis miring menandai direktori) |
+| `readText` / `readBytes` | `cat` / `base64` |
+| `writeText` / `writeBytes` | tulis ke berkas sementara, lalu `cp` |
+| `calculateSize` | `du -sk` |
+| `calculateMD5` | `md5sum` |
+| `walkFileTree` | `find -type f` |
+| `clearEmptyDirectoriesRecursively` | `find -mindepth 1 -type d -empty -delete` |
+| `setAllPermissions` | `chmod -R 777` |
+
+Operasi paket yang bisa dijalankan shell juga dialihkan: `pm path`,
+`pm grant`/`pm revoke`, `am force-stop`, `appops set`, `pm enable`/`disable`,
+dan `settings get`/`put`.
+
+Dua hal yang perlu diperhatikan:
+
+- **`writeBytes` tidak bisa menulis lewat `stdin`.** Aplikasi menulis dulu ke
+  direktori sementaranya sendiri, lalu shell menyalinnya. Direktori sementaranya
+  harus yang **eksternal** (`externalCacheDir`), karena shell tidak bisa membaca
+  `cacheDir` privat aplikasi.
+- **`readBytes` memakai base64** supaya byte tidak rusak saat melewati shell.
+
+`RemoteRootService` sekarang punya `shellMode()`, dan **seluruh 42 metodenya**
+memiliki cabang shell. Invariannya: saat mode Shizuku aktif, libsu sama sekali
+tidak disentuh — kalau disentuh, ia akan mencoba membangun proses root dan gagal
+berulang kali. Terverifikasi: **0 pemanggilan `getService()` tanpa penjaga.**
+
+Metode yang memang butuh uid 0 mengembalikan nilai kosong yang aman:
+SSAID, `StorageStats`, pembacaan appops, dan permission flags.
+
 ---
 
 ## Yang belum dikerjakan
 
-Yang masih tersisa:
-
-1. **Operasi berkas saat backup/restore masih lewat `RemoteRootService`.**
-   Ada 24 pemanggilan di `AppsRepo`: `exists`, `deleteRecursively`,
-   `calculateMD5`, `walkFileTree`, `readJson`, `writeJson`, `renameTo`,
-   `clearEmptyDirectoriesRecursively`, `calculateSize`, `listFilePaths`,
-   `getPackageSourceDir`, `createNewFile`, `copyTo`, `copyRecursively`.
-   Sebagian besar bisa diganti perintah shell biasa (`test -e`, `rm -rf`,
-   `md5sum`, `find`, `cp`, `mv`). Ini blok berikutnya.
-2. **`Bmgr` belum terhubung ke alur backup/restore.** Kelasnya sudah ada dan
+1. **`Bmgr` belum terhubung ke alur backup/restore.** Kelasnya sudah ada dan
    teruji, tetapi belum dipanggil dari service mana pun. Ini yang menangani
-   data privat `/data/data` — bagian yang tidak bisa dijangkau shell.
-3. **`core/network`** (SMB/SFTP/FTP/WebDAV) masih ada. Masih dipakai
+   data privat `/data/data` — bagian yang tidak bisa dijangkau shell sama sekali.
+2. **`core/network`** (SMB/SFTP/FTP/WebDAV) masih ada. Masih dipakai
    `CloudRepository`, yang masih di-inject ke `AppsRepo`, `PackageRepository`,
    dan service backup/restore. Menghapusnya menyentuh ~15 berkas di `core/data`
    dan `core/service`.
-4. **`core/service/medium/`** dan `MediumBackupUtil`/`MediumRestoreUtil` masih
+3. **`core/service/medium/`** dan `MediumBackupUtil`/`MediumRestoreUtil` masih
    ada, sekarang tanpa pemakai dari UI.
-5. **`Target.Files`** masih ada di enum, dan masih ditangani di `ListActions`,
+4. **`Target.Files`** masih ada di enum, dan masih ditangani di `ListActions`,
    `ListItems`, `ListItemsViewModel`, `ListBottomSheetViewModel`,
    `ListActionsViewModel`, `ListDataRepo`, `DetailsViewModel`. Sudah tidak bisa
    dijangkau dari UI.
-6. **Ukuran penyimpanan tampil kosong pada mode Shizuku.** Bisa diperbaiki
+5. **Ukuran penyimpanan tampil kosong pada mode Shizuku.** Bisa diperbaiki
    dengan meminta izin `PACKAGE_USAGE_STATS` (Usage access) ke pengguna.
-7. **Belum diuji di perangkat.** Seluruh kode Shizuku baru terverifikasi
-   kompilasi, belum pernah dijalankan di HP sungguhan. Tiga hal yang paling
+6. **Belum diuji di perangkat.** Seluruh kode Shizuku baru terverifikasi
+   kompilasi, belum pernah dijalankan di HP sungguhan. Empat hal yang paling
    perlu diuji lebih dulu:
    - apakah `/data/local/tmp/databackup-bin` bisa dieksekusi shell
    - apakah shell bisa menulis ke kartu SD lewat `/storage/<uuid>`
    - apakah `bmgr` diterima untuk game dengan `allowBackup="false"`
+   - apakah `find -empty -delete` dan `ls -p` tersedia di toybox perangkat
+
 
 
 
