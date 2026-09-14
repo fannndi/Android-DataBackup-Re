@@ -157,34 +157,69 @@ Shell hanya punya akses ke `Android/data` dan `Android/obb` lewat grup
 `ext_data_rw` / `ext_obb_rw` pada jalur FUSE. Tanpa penyesuaian ini, backup
 data eksternal game akan gagal walau Shizuku sudah aktif.
 
+### 8. Daftar game dan info penyimpanan tanpa root
+
+Sebelumnya seluruh query paket dan pembacaan penyimpanan lewat
+`RemoteRootService` (libsu `RootService`). Tanpa root itu berarti daftar game
+kosong dan tombol backup nonaktif.
+
+Polanya: helper kecil di repository yang bercabang pada
+`BaseUtil.isShizukuMode()`. Prinsipnya, **`rootService` tidak boleh disentuh
+sama sekali saat mode Shizuku aktif** — kalau disentuh, libsu akan mencoba
+membangun proses root berulang kali.
+
+| Repository | Helper | Padanan tanpa root |
+|---|---|---|
+| `AppsRepo` | `users()` | hanya pengguna aktif |
+| `AppsRepo` | `installedPackages()` | `PackageManager.getInstalledPackages` |
+| `AppsRepo` | `packageInfo()` | `PackageManager.getPackageInfo` |
+| `AppsRepo` | `userHandleOf()` | `Process.myUserHandle()` |
+| `AppsRepo` | `permissionsOf()` | `requestedPermissions` + `requestedPermissionsFlags` |
+| `AppsRepo` | `storageStats()` | kosong (butuh `PACKAGE_USAGE_STATS`) |
+| `DirectoryRepository` | `listDirPaths()` | `File.listFiles()` |
+| `DirectoryRepository` | `statFsOf()` | `android.os.StatFs` |
+| `DirectoryRepository` | `sizeOf()` | `du -sk` lewat shell |
+| `DirectoryRepository` | `externalAccessPath()` | `/mnt/media_rw/<uuid>` → `/storage/<uuid>` |
+| `PackageUtil` | `hasKeystore()` | false (butuh root) |
+
+`StatFs` dan `PackageManager` bekerja untuk aplikasi biasa, jadi keduanya tidak
+butuh hak istimewa sama sekali.
+
 ---
 
 ## Yang belum dikerjakan
 
-Perubahan di atas menghapus fitur dari **UI dan modulnya**, dan sudah
-menyediakan backend Shizuku. Yang masih tersisa:
+Yang masih tersisa:
 
-1. **`core/network`** (SMB/SFTP/FTP/WebDAV) masih ada. Masih dipakai
+1. **Operasi berkas saat backup/restore masih lewat `RemoteRootService`.**
+   Ada 24 pemanggilan di `AppsRepo`: `exists`, `deleteRecursively`,
+   `calculateMD5`, `walkFileTree`, `readJson`, `writeJson`, `renameTo`,
+   `clearEmptyDirectoriesRecursively`, `calculateSize`, `listFilePaths`,
+   `getPackageSourceDir`, `createNewFile`, `copyTo`, `copyRecursively`.
+   Sebagian besar bisa diganti perintah shell biasa (`test -e`, `rm -rf`,
+   `md5sum`, `find`, `cp`, `mv`). Ini blok berikutnya.
+2. **`Bmgr` belum terhubung ke alur backup/restore.** Kelasnya sudah ada dan
+   teruji, tetapi belum dipanggil dari service mana pun. Ini yang menangani
+   data privat `/data/data` — bagian yang tidak bisa dijangkau shell.
+3. **`core/network`** (SMB/SFTP/FTP/WebDAV) masih ada. Masih dipakai
    `CloudRepository`, yang masih di-inject ke `AppsRepo`, `PackageRepository`,
    dan service backup/restore. Menghapusnya menyentuh ~15 berkas di `core/data`
    dan `core/service`.
-2. **`core/service/medium/`** dan `MediumBackupUtil`/`MediumRestoreUtil` masih
+4. **`core/service/medium/`** dan `MediumBackupUtil`/`MediumRestoreUtil` masih
    ada, sekarang tanpa pemakai dari UI.
-3. **`Target.Files`** masih ada di enum, dan masih ditangani di `ListActions`,
+5. **`Target.Files`** masih ada di enum, dan masih ditangani di `ListActions`,
    `ListItems`, `ListItemsViewModel`, `ListBottomSheetViewModel`,
    `ListActionsViewModel`, `ListDataRepo`, `DetailsViewModel`. Sudah tidak bisa
    dijangkau dari UI.
-4. **`Bmgr` belum terhubung ke alur backup/restore.** Kelasnya sudah ada dan
-   teruji, tetapi belum dipanggil dari service mana pun. Ini pekerjaan
-   berikutnya: menjadikannya sumber `DataType` baru (mis. `PACKAGE_PRIVATE_BMGR`)
-   dengan migrasi Room, tombol di layar detail game, dan alur restore
-   `pm clear` → `bmgr restore` → `bmgr run`.
-5. **`RemoteRootService` masih memakai libsu `RootService`.** Operasi yang
-   bergantung padanya (query `PackageManager` versi hidden, statistik
-   penyimpanan, SSAID) belum punya padanan Shizuku. Untuk mode shell, sebagian
-   di antaranya bisa dialihkan ke `pm`/`dumpsys` biasa.
-6. **Belum diuji di perangkat.** Seluruh kode Shizuku baru terverifikasi
-   kompilasi, belum pernah dijalankan di HP sungguhan.
+6. **Ukuran penyimpanan tampil kosong pada mode Shizuku.** Bisa diperbaiki
+   dengan meminta izin `PACKAGE_USAGE_STATS` (Usage access) ke pengguna.
+7. **Belum diuji di perangkat.** Seluruh kode Shizuku baru terverifikasi
+   kompilasi, belum pernah dijalankan di HP sungguhan. Tiga hal yang paling
+   perlu diuji lebih dulu:
+   - apakah `/data/local/tmp/databackup-bin` bisa dieksekusi shell
+   - apakah shell bisa menulis ke kartu SD lewat `/storage/<uuid>`
+   - apakah `bmgr` diterima untuk game dengan `allowBackup="false"`
+
 
 
 ---
