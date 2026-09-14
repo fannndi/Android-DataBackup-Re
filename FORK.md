@@ -275,36 +275,92 @@ Yang diperiksa dan sudah aman tanpa perubahan: **SSAID** mengembalikan string
 kosong saat backup pada mode Shizuku sehingga restore melewatinya, dan
 **restore izin** memakai `pm grant`/`pm revoke` yang bisa dijalankan shell.
 
+### 12. Data privat lewat BackupManager (`bmgr`)
+
+Ini melengkapi bagian yang tidak bisa dijangkau shell sama sekali.
+
+Data privat **tidak dibaca sendiri** oleh shell — memang tidak bisa. Kita
+meminta `BackupManagerService`, yang berjalan sebagai uid system, membacanya
+dan menyerahkannya ke sebuah *transport*. Saat restore, sistem pula yang
+menulis kembali berkasnya, sehingga kepemilikan uid/gid dan konteks SELinux
+benar **tanpa perlu `chown`** — masalah yang tadinya mustahil diselesaikan.
+
+| Bagian | Perubahan |
+|---|---|
+| Model | `PackageExtraInfo.bmgrToken` (default kosong) |
+| Database | `AppDatabase` versi 8 + `AutoMigration(7, 8)` |
+| Perintah | `Pm.clear()` baru |
+| Backup | `PackagesBackupUtil.backupPrivateBmgr()` |
+| Restore | `PackagesRestoreUtil.restorePrivateBmgr()` |
+| Orkestrasi | Dipanggil di `AbstractBackupService` dan `AbstractRestoreService` |
+
+Migrasi database **tidak perlu ditulis manual**: Room memakai `autoMigrations`
+dan kolomnya punya nilai default, jadi Room menyusun sendiri. Skema `8.json`
+tergenerasi dengan `bmgrToken TEXT NOT NULL DEFAULT ''`.
+
+**Urutan restore itu penting.** `restorePrivateBmgr` dijalankan **setelah APK
+terpasang tetapi sebelum data eksternal**, karena di dalamnya ada `pm clear`
+yang mengosongkan data aplikasi lebih dulu:
+
+```
+restore APK  ->  pm clear + bmgr restore + bmgr run  ->  restore Android/data, obb, media  ->  permissions, ssaid
+```
+
+#### Batasan yang harus diketahui
+
+**Transport `local` menyimpan citranya di `getFilesDir()` aplikasi
+`com.android.localtransport`** — yaitu direktori privat uid system, ber-mode
+`0700`. Shell tidak bisa membacanya, dan aplikasi biasa juga tidak.
+
+Artinya: **citra bmgr tidak ikut tersalin ke kartu SD, dan tidak selamat dari
+factory reset.** Yang tersalin ke kartu SD hanyalah APK, OBB, dan `Android/data`.
+
+Jadi bagian ini berguna untuk **pemulihan di perangkat yang sama** — rollback
+setelah update bermasalah, atau menyelamatkan progres setelah salah hapus data.
+Bukan untuk pindah ke HP baru.
+
+Untuk membuatnya portabel, diperlukan *transport* sendiri yang menerima aliran
+data dari BackupManager dan menuliskannya ke kartu SD. Itu proyek tersendiri,
+dan belum dikerjakan.
+
+#### Perilaku saat tidak bisa dijalankan
+
+Game dengan `allowBackup="false"` tidak menghasilkan citra. Itu dicatat sebagai
+peringatan, **bukan kegagalan**, karena APK, OBB, dan data eksternal tetap
+terbackup utuh. Token dikosongkan sehingga restore melewati langkah ini.
+
 ---
 
 ## Yang belum dikerjakan
 
-1. **`Bmgr` belum terhubung ke alur backup/restore.** Kelasnya sudah ada dan
-   teruji, tetapi belum dipanggil dari service mana pun. Ini yang menangani
-   data privat `/data/data` — bagian yang tidak bisa dijangkau shell sama sekali.
-   Perlu diingat: citra transport `local` bersifat device-local, jadi bagian ini
-   tidak bisa di-export ke kartu SD dan tidak tahan factory reset.
-2. **`core/network`** (SMB/SFTP/FTP/WebDAV) masih ada. Masih dipakai
+1. **`core/network`** (SMB/SFTP/FTP/WebDAV) masih ada. Masih dipakai
    `CloudRepository`, yang masih di-inject ke `AppsRepo`, `PackageRepository`,
    dan service backup/restore. Menghapusnya menyentuh ~15 berkas di `core/data`
    dan `core/service`.
-3. **`core/service/medium/`** dan `MediumBackupUtil`/`MediumRestoreUtil` masih
-   ada, sekarang tanpa pemakai dari UI.
-4. **`Target.Files`** masih ada di enum, dan masih ditangani di `ListActions`,
-   `ListItems`, `ListItemsViewModel`, `ListBottomSheetViewModel`,
-   `ListActionsViewModel`, `ListDataRepo`, `DetailsViewModel`. Sudah tidak bisa
-   dijangkau dari UI.
-5. **Ukuran penyimpanan tampil kosong pada mode Shizuku.** Bisa diperbaiki
+2. **`core/data/repository/FilesRepo.kt`** dan **`MediaRepository.kt`** masih
+   ada, beserta `FilesLoadWorker`/`FilesUpdateWorker` dan cabang `Target.Files`
+   di `ListActions`, `ListItems`, `ListItemsViewModel`,
+   `ListBottomSheetViewModel`, `ListActionsViewModel`, `ListDataRepo`,
+   `DetailsViewModel`. Sudah tidak bisa dijangkau dari UI. (Langkah startup-nya
+   sudah dihentikan di `WorkManagerInitializer`.)
+3. **`Target.Files`** masih ada di enum, dan `MediaEntity` masih ada di skema
+   database. Menghapus entitasnya butuh migrasi dan menyentuh lebih banyak
+   berkas.
+4. **Ukuran penyimpanan tampil kosong pada mode Shizuku.** Bisa diperbaiki
    dengan meminta izin `PACKAGE_USAGE_STATS` (Usage access) ke pengguna.
-6. **`setDisplayPowerMode` menjadi no-op.** Memaksa layar mati hanya bisa
+5. **`setDisplayPowerMode` menjadi no-op.** Memaksa layar mati hanya bisa
    dilakukan sistem.
-7. **Belum diuji di perangkat.** Seluruh kode Shizuku baru terverifikasi
-   kompilasi, belum pernah dijalankan di HP sungguhan. Empat hal yang paling
-   perlu diuji lebih dulu:
+6. **Transport portabel untuk citra bmgr.** Lihat batasan di atas. Ini yang
+   akan membuat data privat ikut tersalin ke kartu SD.
+7. **Belum diuji di perangkat.** Seluruh kode Shizuku terverifikasi kompilasi,
+   belum pernah dijalankan di HP sungguhan. Lima hal yang paling perlu diuji
+   lebih dulu:
    - apakah `/data/local/tmp/databackup-bin` bisa dieksekusi shell
    - apakah shell bisa menulis ke kartu SD lewat `/storage/<uuid>`
    - apakah `bmgr` diterima untuk game dengan `allowBackup="false"`
    - apakah `find -empty -delete` dan `ls -p` tersedia di toybox perangkat
+   - apakah migrasi database 7 ke 8 berjalan mulus saat aplikasi dibuka
+
 
 
 
