@@ -583,6 +583,39 @@ sampai isi berkasnya:
 
 ---
 
+### 17. Arsip privat kosong tidak menimpa arsip yang berisi
+
+Temuan lapangan: pernah menekan backup setelah data aplikasi dikosongkan,
+sehingga arsip privat lama yang berisi tertimpa arsip baru yang isinya hanya
+`./`. Arsip lama yang berisi data lebih berharga daripada arsip kosong.
+
+`RunAs.entryCount()` menghitung entri arsip lewat
+`zstd -d -c <arsip> | tar -tf - | wc -l` (atau `cat` bila tidak terkompresi).
+
+`PackagesBackupUtil.backupData` untuk `PACKAGE_USER` sekarang:
+
+1. Mengompresi ke berkas sementara `<dst>.part` — arsip lama belum tersentuh
+2. Menguji arsip sementara; kalau gagal, keduanya dibuang dan arsip lama utuh
+3. Kalau arsip baru hanya berisi <= 1 entri sedangkan arsip lama > 1 entri,
+   arsip baru dibuang, arsip lama dipertahankan, dan langkah ditandai **SKIP**
+   (bukan ERROR)
+4. Kalau lolos, arsip sementara di-rename menimpa yang lama
+
+**Diverifikasi di perangkat** (POCO X3 NFC, Android 10):
+
+| Langkah | Hasil |
+|---|---|
+| Arsip bagus dibuat (data uji via `run-as`) | 263 byte, 7 entri |
+| `pm clear` lalu backup lagi | arsip **tetap 263 byte**, isi utuh |
+| Log | `Data privat kosong (...); arsip lama dipertahankan.` |
+| Hasil UI | "Backup completed, 6/6" — SKIP bukan ERROR |
+| Berkas `.part` | tidak ada yang tertinggal |
+
+Sebelum perbaikan, skenario yang sama menghasilkan arsip 92 byte berisi hanya
+`./` — bug-nya sempat tereproduksi lebih dulu dengan APK lama.
+
+---
+
 ## Yang belum dikerjakan
 
 1. **`core/network`** (SMB/SFTP/FTP/WebDAV) masih ada. Modul itu juga berisi
@@ -609,11 +642,23 @@ sampai isi berkasnya:
    Paket debuggable sudah portabel lewat `run-as` (bagian 16); untuk yang
    lain Transport tetap `local` dan tidak ikut tersalin ke kartu SD
    (lihat batasan di bagian 12).
-7. **Bagian baru (bagian 16) sudah diuji perangkat** untuk `run-as` backup &
-   restore, AppOps, ukuran paket, dan status aktif — rinciannya di akhir
-   bagian 16. Yang belum: alur Wireless debugging (Android 11+), Shizuku
-   sungguhan, dan pemulihan izin/appops lewat tombol restore izin (perintah
-   `pm grant/revoke` + `appops set`-nya sudah terbukti jalan di jalur lain).
+7. **Bagian baru (bagian 16 dan 17) sudah diuji perangkat** untuk `run-as`
+   backup & restore, AppOps, ukuran paket, status aktif, dan pengaman arsip
+   kosong. Yang belum:
+   - **Jalur Shizuku belum pernah diuji perangkat sama sekali.** Shizuku 13.6.0
+     terpasang di HP uji tetapi servernya belum jalan; perangkat tidak di-root
+     dan Android 10 tidak punya Wireless debugging, jadi harus dimulai lewat
+     "Start by connecting to a computer" dari aplikasi Shizuku. Setelah server
+     jalan, jalur ini perlu diuji ulang dari awal.
+   - Alur Wireless debugging (Android 11+).
+   - Pemulihan izin/appops lewat tombol restore izin (perintahnya sudah
+     terbukti jalan di jalur lain).
+8. **Ukuran data Azur Lane jauh melebihi ruang kartu SD.** Di HP uji:
+   `Android/data` 11 GB + `obb` 1,4 GB, sedangkan kartu SD sisa 12 GB. Backup
+   penuh akan memenuhi kartu. Perlu diputuskan: pilih sebagian data, kosongkan
+   kartu, atau pakai penyimpanan lain. Perlu diingat juga aset game umumnya
+   sudah terkompresi, sehingga `zstd` akan lambat dengan rasio kecil — dan
+   timeout shell 600 detik per perintah berisiko untuk 12 GB.
 
 ---
 
