@@ -779,6 +779,58 @@ kegagalan Shizuku langsung mengakhiri proses, sehingga ADB tidak pernah dicoba.
 
 ---
 
+### 21. Backup Azur Lane lengkap 11 GB — dan kenapa `Android/data` itu intinya
+
+Koreksi penting: uji di bagian 19 melewati `Android/data` (11 GB) karena ruang
+kartu SD mepet. Itu **trade-off yang salah** untuk tujuan pemakaian aplikasi
+ini. Yang lambat diunduh justru data 11 GB tersebut; OBB 1,4 GB memang cepat.
+Backup tanpa `Android/data` hampir tidak ada gunanya.
+
+**Hasil backup lengkap:**
+
+| Bagian | Sumber | Arsip |
+|---|---|---|
+| APK | 224 MB | 68 MB |
+| **DATA** | **11 GB** | **10,77 GB** |
+| OBB | 1,45 GB | 1,28 GB |
+| Total | ~12,7 GB | **11 GB** |
+
+Kartu SD 27 GB → 16 GB kosong. Hasil UI: "Backup completed, Azur Lane 6/6".
+
+**Rasio kompresi hampir 1:1** (11 GB → 10,77 GB) karena aset game sudah
+terkompresi. Laju tulis 18 MiB/detik.
+
+**Temuan penting — batas waktu 600 detik TIDAK cukup:**
+
+```
+20:33:04  Backing up data...
+20:43:42  Total bytes written: 11785912320 (11GiB, 18MiB/s)
+```
+
+`Android/data` memakan **10 menit 38 detik (638 detik)**. Tanpa kenaikan batas
+ke 3600 detik di bagian 18, backup ini akan dimatikan di menit ke-10 dan gagal.
+Ini validasi nyata untuk perubahan itu.
+
+**Aplikasi menguji arsipnya sendiri** setelah kompresi:
+
+```
+zstd -d -c ".../data.tar.zst" | tar -tf - > /dev/null 2>&1   -> kode 0
+CommonBackupUtil  Everything seems fine.
+```
+
+**Pelajaran pengujian — verifikasi PAKET, bukan hanya jenis data.** Sempat
+salah backup: yang diproses Evitania Online, bukan Azur Lane, karena daftar
+tersusun ulang (item terpilih naik ke atas) sehingga tap mengenai baris yang
+salah. Urutan yang benar sebelum menjalankan backup:
+
+1. Dump daftar dengan `uiautomator` dan baca `bounds` — jangan menebak dari
+   tangkapan layar
+2. Verifikasi paket terpilih di database:
+   `select indexInfo_packageName from PackageEntity where extraInfo_activated=1`
+3. Baru jalankan
+
+---
+
 ## Yang belum dikerjakan
 
 1. **`core/network`** (SMB/SFTP/FTP/WebDAV) masih ada. Modul itu juga berisi
