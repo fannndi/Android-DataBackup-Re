@@ -616,6 +616,54 @@ Sebelum perbaikan, skenario yang sama menghasilkan arsip 92 byte berisi hanya
 
 ---
 
+### 18. Jalur Shizuku diverifikasi perangkat
+
+Ini verifikasi perangkat **pertama** untuk jalur Shizuku — sebelumnya seluruh
+lapisan ini hanya lolos kompilasi.
+
+**Cara memulai Shizuku di Android 10 tanpa root:** buka aplikasi Shizuku →
+"Start via Wireless debugging" → **Start**. Starter-nya memakai ADB pada port
+5555, jadi `adb tcpip 5555` harus sudah aktif lebih dulu. Kalau gagal, tekan
+Start sekali lagi — percobaan pertama di sesi ini mati setelah server sempat
+start, percobaan kedua bertahan.
+
+**Hasil uji:**
+
+| Uji | Hasil |
+|---|---|
+| Aplikasi memakai Shizuku | Terlihat dari tidak adanya koneksi TCP ke port 5555 |
+| Backup penuh | "1 apps backed up, 6/6" |
+| Isi arsip privat | `savegame.dat` berisi `player_shizuku`, persis data uji |
+| Restore | "1 apps restored, 6/6" |
+| Data setelah restore | Pulih identik |
+| Log | Bersih, tanpa error |
+
+**Uji andal — apa yang terjadi kalau Shizuku mati:**
+
+1. `shizuku_server` dimatikan paksa
+2. Aplikasi dijalankan ulang
+3. Aplikasi **otomatis memakai ADB** (terlihat dari koneksi TCP ke
+   `127.0.0.1:5555`) dan perintahnya sukses tanpa error
+4. Server Shizuku dihidupkan lagi, aplikasi dijalankan ulang → kembali ke
+   Shizuku
+
+Jadi aplikasi tidak menjadi tidak bisa dipakai ketika Shizuku berhenti —
+misalnya setelah HP di-restart, karena Shizuku memang tidak otomatis jalan.
+
+**Dua celah andal yang ditemukan dan diperbaiki:**
+
+1. `ShellModeInitializer` mengembalikan hasil Shizuku apa adanya. Kalau Shizuku
+   punya izin tetapi gagal disiapkan (mis. binary tidak bisa disinggahkan),
+   jalur ADB tidak pernah dicoba — padahal kuncinya masih tersimpan. Sekarang
+   kegagalan Shizuku dicatat dan ADB tetap dicoba.
+2. Batas waktu perintah 600 detik terlalu ketat untuk game besar. Satu perintah
+   `tar | zstd` untuk 11 GB yang ditulis ke kartu SD kelas 10 sudah lebih dari
+   18 menit. Dinaikkan menjadi 3600 detik pada kedua backend. Catatan penting:
+   saat batas waktu terlampaui kita hanya berhenti menunggu, proses di sisi
+   shell bisa terus berjalan — jadi membiarkannya selesai lebih baik.
+
+---
+
 ## Yang belum dikerjakan
 
 1. **`core/network`** (SMB/SFTP/FTP/WebDAV) masih ada. Modul itu juga berisi
@@ -642,15 +690,10 @@ Sebelum perbaikan, skenario yang sama menghasilkan arsip 92 byte berisi hanya
    Paket debuggable sudah portabel lewat `run-as` (bagian 16); untuk yang
    lain Transport tetap `local` dan tidak ikut tersalin ke kartu SD
    (lihat batasan di bagian 12).
-7. **Bagian baru (bagian 16 dan 17) sudah diuji perangkat** untuk `run-as`
-   backup & restore, AppOps, ukuran paket, status aktif, dan pengaman arsip
-   kosong. Yang belum:
-   - **Jalur Shizuku belum pernah diuji perangkat sama sekali.** Shizuku 13.6.0
-     terpasang di HP uji tetapi servernya belum jalan; perangkat tidak di-root
-     dan Android 10 tidak punya Wireless debugging, jadi harus dimulai lewat
-     "Start by connecting to a computer" dari aplikasi Shizuku. Setelah server
-     jalan, jalur ini perlu diuji ulang dari awal.
-   - Alur Wireless debugging (Android 11+).
+7. **Jalur Shizuku sudah diuji perangkat** (bagian 18). Yang belum:
+   - Alur Wireless debugging di Android 11+ (perangkat uji Android 10, jadi
+     Shizuku dimulai lewat "Start via Wireless debugging" dengan
+     `adb tcpip 5555`).
    - Pemulihan izin/appops lewat tombol restore izin (perintahnya sudah
      terbukti jalan di jalur lain).
 8. **Ukuran data Azur Lane jauh melebihi ruang kartu SD.** Di HP uji:
