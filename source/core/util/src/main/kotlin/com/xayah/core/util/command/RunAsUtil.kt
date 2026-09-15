@@ -154,6 +154,22 @@ object RunAs {
         return result.out.firstOrNull { it.isNotBlank() }?.trim().orEmpty()
     }
 
+    /**
+     * Jumlah entri arsip privat.
+     *
+     * Dipakai sebagai pengaman: arsip yang isinya hanya `./` berasal dari
+     * direktori aplikasi yang kosong (mis. habis di-`pm clear`), dan arsip
+     * privat lama yang berisi data tidak boleh tertimpa olehnya.
+     */
+    suspend fun entryCount(src: String, extra: String): Int {
+        val source = if (extra.isEmpty()) "cat ${quote(src)}" else "zstd -d -c ${quote(src)}"
+        val result = BaseUtil.execute(
+            "$source $STDERR_NULL | tar -tf - $STDERR_NULL | wc -l",
+            log = false,
+        )
+        return result.out.firstOrNull { it.isNotBlank() }?.trim()?.toIntOrNull() ?: 0
+    }
+
     enum class ArchiveLayout { RUN_AS, ROOT, UNKNOWN }
 
     /**

@@ -311,22 +311,56 @@ class PackagesBackupUtil @Inject constructor(
                     t.updateInfo(dataType = dataType, state = OperationState.SKIP)
                     out.add(log { "Data has not changed." })
                 } else {
+                    // Ditulis ke berkas sementara lebih dulu supaya arsip lama
+                    // tidak hilang sebelum isi baru terbukti berisi. Lihat
+                    // pengaman "data privat kosong" di bawah.
+                    val compressLevel = context.readCompressionLevel().first()
+                    val tmpDst = "$dst.part"
                     RunAs.compress(
                         packageName = packageName,
                         cur = cur,
-                        dst = dst,
-                        extra = ct.getCompressPara(context.readCompressionLevel().first()),
+                        dst = tmpDst,
+                        extra = ct.getCompressPara(compressLevel),
                     ).also { result ->
                         isSuccess = result.isSuccess
                         out.addAll(result.out)
                     }
-                    commonBackupUtil.testArchive(src = dst, ct = ct).also { result ->
-                        isSuccess = isSuccess && result.isSuccess
-                        out.addAll(result.out)
-                        if (result.isSuccess) {
-                            p.setDataBytes(dataType, sizeBytes)
-                            p.setDisplayBytes(dataType, rootService.calculateSize(dst))
+
+                    var compressed = isSuccess
+                    if (compressed) {
+                        commonBackupUtil.testArchive(src = tmpDst, ct = ct).also { result ->
+                            compressed = result.isSuccess
+                            out.addAll(result.out)
                         }
+                    }
+
+                    if (compressed) {
+                        // Pengaman: direktori privat yang telanjur kosong (mis.
+                        // habis `pm clear`) menghasilkan arsip berisi hanya
+                        // `./`. Arsip lama yang berisi data lebih berharga
+                        // daripada arsip kosong, jadi yang baru dibuang.
+                        val newEntries = RunAs.entryCount(tmpDst, ct.decompressPara)
+                        val oldEntries = if (dataType == DataType.PACKAGE_USER &&
+                            rootService.exists(dst) && rootService.calculateSize(dst) > 0
+                        ) {
+                            RunAs.entryCount(dst, ct.decompressPara)
+                        } else {
+                            0
+                        }
+                        if (dataType == DataType.PACKAGE_USER && newEntries <= 1 && oldEntries > 1) {
+                            rootService.deleteRecursively(tmpDst)
+                            out.add(log { "Data privat kosong ($cur); arsip lama dipertahankan." })
+                            isSuccess = true
+                            t.updateInfo(dataType = dataType, state = OperationState.SKIP, log = out.toLineString())
+                            return@run ShellResult(code = 0, input = listOf(), out = out)
+                        }
+
+                        rootService.renameTo(src = tmpDst, dst = dst)
+                        p.setDataBytes(dataType, sizeBytes)
+                        p.setDisplayBytes(dataType, rootService.calculateSize(dst))
+                    } else {
+                        isSuccess = false
+                        rootService.deleteRecursively(tmpDst)
                     }
                 }
                 t.updateInfo(dataType = dataType, state = if (isSuccess) OperationState.DONE else OperationState.ERROR, log = out.toLineString())
