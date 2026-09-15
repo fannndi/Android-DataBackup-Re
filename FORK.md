@@ -664,6 +664,61 @@ misalnya setelah HP di-restart, karena Shizuku memang tidak otomatis jalan.
 
 ---
 
+### 19. Backup game asli: Azur Lane
+
+Uji pertama pada game asli (bukan dummy), sekaligus membuat backup nyata untuk
+pengguna.
+
+**Cara melewati data 11 GB.** Chip jenis data di layar **Details** (ketuk baris
+game, bukan kotak centang) tersimpan ke database dan dihormati saat backup:
+`backupApk` dan `backupData` memeriksa `p.getDataSelected(dataType)` lalu
+menandai SKIP. Urutannya:
+
+1. Buka Details Azur Lane, matikan chip **DATA** (11,02 GB)
+2. **Verifikasi di database sebelum menjalankan backup** — kalau pilihannya
+   tidak tersimpan, backup akan mencoba 11 GB dan memenuhi kartu SD:
+   ```
+   select dataStates_dataState from PackageEntity
+    where indexInfo_packageName='com.YoStarEN.AzurLane'   -- harus NotSelected
+   ```
+3. Kembali, pilih lewat kotak centang — indikatornya berubah **kuning** sebagai
+   tanda tidak semua jenis data dipilih
+4. Continue tiga kali
+
+**Hasil:**
+
+| Bagian | Hasil |
+|---|---|
+| DATA 11,02 GB | **SKIP** |
+| APK 224 MB | `apk.tar.zst` 68 MB, 212 MiB/detik |
+| OBB 1,45 GB | `obb.tar.zst` 1,28 GB, 60 detik (25 MiB/detik) |
+| MEDIA | tidak ada, dilewati |
+| USER / USER_DE | lewat bmgr |
+| Hasil UI | "1 apps backed up, 6/6" |
+
+Kartu SD: 12 GB → 10 GB tersisa.
+
+**Temuan penting — bmgr ditolak untuk Azur Lane:**
+
+```
+bmgr backupnow com.YoStarEN.AzurLane
+Package com.YoStarEN.AzurLane with result: Backup is not allowed
+```
+
+Dua percobaan, lalu menyerah dengan pesan jelas. Artinya **data privat Azur Lane
+tidak bisa di-backup** — game ini memakai `allowBackup="false"` atau diblokir
+MIUI. Aplikasi menanganinya dengan benar: peringatan, bukan kegagalan, dan APK
+serta OBB tetap utuh. Untuk game online seperti Azur Lane ini tidak fatal:
+progres ada di server, sedangkan bagian yang mahal (1,7 GB aset) justru
+terbackup.
+
+**Catatan timeout.** OBB 1,45 GB selesai dalam 60 detik. Untuk 11 GB itu sekitar
+7,5 menit — masih di bawah batas lama 600 detik tetapi hanya terpaut sedikit,
+jadi kenaikan batas ke 3600 detik tetap masuk akal untuk kartu yang lebih
+lambat.
+
+---
+
 ## Yang belum dikerjakan
 
 1. **`core/network`** (SMB/SFTP/FTP/WebDAV) masih ada. Modul itu juga berisi
@@ -696,12 +751,12 @@ misalnya setelah HP di-restart, karena Shizuku memang tidak otomatis jalan.
      `adb tcpip 5555`).
    - Pemulihan izin/appops lewat tombol restore izin (perintahnya sudah
      terbukti jalan di jalur lain).
-8. **Ukuran data Azur Lane jauh melebihi ruang kartu SD.** Di HP uji:
-   `Android/data` 11 GB + `obb` 1,4 GB, sedangkan kartu SD sisa 12 GB. Backup
-   penuh akan memenuhi kartu. Perlu diputuskan: pilih sebagian data, kosongkan
-   kartu, atau pakai penyimpanan lain. Perlu diingat juga aset game umumnya
-   sudah terkompresi, sehingga `zstd` akan lambat dengan rasio kecil — dan
-   timeout shell 600 detik per perintah berisiko untuk 12 GB.
+8. **Data privat game yang memakai `allowBackup="false"` tidak bisa diambil.**
+   Azur Lane termasuk: `bmgr` menolak dengan "Backup is not allowed" (bagian
+   19). Aplikasi menanganinya sebagai peringatan, bukan kegagalan. Untuk game
+   online ini tidak fatal karena progres ada di server, tetapi untuk game
+   offline yang menolak backup, data privatnya memang tidak bisa diselamatkan
+   tanpa root.
 9. **Area sentuh kotak centang di daftar belum stabil (perlu diperiksa).**
    Saat menguji di perangkat, tap pada kotak centang baris pertama dan kedua
    bekerja, tetapi tap pada baris ketiga berulang kali justru membuka layar
