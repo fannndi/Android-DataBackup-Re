@@ -1,11 +1,14 @@
 package com.xayah.core.rootservice.service
 
+import android.app.usage.StorageStatsManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
 import android.content.pm.UserInfo
+import android.os.Build
 import android.os.IBinder
 import android.os.Parcel
 import android.os.ParcelFileDescriptor
@@ -345,8 +348,21 @@ class RemoteRootService(private val context: Context) {
         else runCatching { getService().getUserHandle(userId) }.onFailure(onFailure).getOrNull()
 
     suspend fun queryStatsForPackage(packageInfo: PackageInfo, user: UserHandle): StorageStatsParcelable? =
-        // Butuh PACKAGE_USAGE_STATS; pada mode Shizuku ukuran dilewati.
-        if (shellMode()) null
+        // Di mode shell statistik dibaca aplikasi sendiri lewat StorageStatsManager.
+        // Izin PACKAGE_USAGE_STATS-nya diberikan otomatis oleh shell saat
+        // backend disiapkan (appops GET_USAGE_STATS allow).
+        if (shellMode()) runCatching {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return@runCatching null
+            val appInfo = packageInfo.applicationInfo ?: return@runCatching null
+            val manager = context.getSystemService(StorageStatsManager::class.java) ?: return@runCatching null
+            val stats = manager.queryStatsForPackage(appInfo.storageUuid, packageInfo.packageName, user)
+            StorageStatsParcelable(
+                stats.appBytes,
+                stats.cacheBytes,
+                stats.dataBytes,
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) stats.externalCacheBytes else 0,
+            )
+        }.getOrNull()
         else runCatching { getService().queryStatsForPackage(packageInfo, user) }.onFailure(onFailure).getOrNull()
 
     suspend fun getUsers(): List<UserInfo> =
@@ -400,7 +416,23 @@ class RemoteRootService(private val context: Context) {
         else runCatching { getService().setApplicationEnabledSetting(packageName, newState, flags, userId, callingPackage) }.onFailure(onFailure)
 
     suspend fun getApplicationEnabledSetting(packageName: String, userId: Int): Int? =
-        if (shellMode()) null
+        // PackageManager aplikasi bisa membaca status efektif paket lain.
+        // State DEFAULT diterjemahkan dulu supaya pemanggil yang membandingkan
+        // dengan COMPONENT_ENABLED_STATE_ENABLED tidak salah menandai
+        // aplikasi aktif sebagai nonaktif (dulu selalu null di mode shell).
+        if (shellMode()) runCatching {
+            val pm = context.packageManager
+            val state = pm.getApplicationEnabledSetting(packageName)
+            if (state == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT) {
+                if (pm.getApplicationInfo(packageName, 0).enabled) {
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                } else {
+                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                }
+            } else {
+                state
+            }
+        }.getOrDefault(PackageManager.COMPONENT_ENABLED_STATE_ENABLED)
         else runCatching { getService().getApplicationEnabledSetting(packageName, userId) }.onFailure(onFailure).getOrNull()
 
     suspend fun getPermissions(packageInfo: PackageInfo): List<PackagePermission> =

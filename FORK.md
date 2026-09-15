@@ -475,6 +475,88 @@ Catatan operasional:
 - Bug #8 dan #9 sempat membuat data privat tampak "berhasil di-backup" padahal
   kosong; keduanya wajib ada agar jalur privat bisa diandalkan.
 
+### 16. Paritas non-root: `run-as`, AppOps, dan ukuran paket
+
+Tiga celah terakhir antara mode shell dan mode root ditutup di sini. Tujuannya
+satu: perangkat tanpa root tidak perlu kehilangan fitur selain yang memang
+mustahil (lihat tabel di bawah).
+
+**1. Data privat paket debuggable lewat `run-as` (baru).**
+
+Selama ini data privat hanya bisa ditangkap `bmgr`, dan citranya terikat
+perangkat — tidak ikut ke kartu SD dan tidak selamat dari factory reset.
+Sekarang paket dengan `android:debuggable="true"` dibaca langsung:
+
+- `run-as <pkg> /system/bin/tar -cpf - -C /data/data/<pkg> . | zstd > user.tar.zst`
+- hasilnya arsip biasa `user.tar.zst`/`user_de.tar.zst` yang **portabel**;
+- restore mengekstrak sebagai uid aplikasi, jadi kepemilikan berkas benar
+  tanpa `chown`/`chcon`;
+- tetap bekerja untuk `allowBackup="false"` — justru kasus game sideload.
+
+Detail yang wajib diingat: proses `run-as` berjalan dalam domain aplikasi,
+jadi **harus** memakai `/system/bin/tar`, `/system/bin/du`, dan
+`/system/bin/sh`; binary singgahan aplikasi tidak bisa dieksekusi. Pipe-nya
+dibungkus `set -o pipefail` supaya kegagalan `tar` tidak tertutup suksesnya
+`zstd` (tanpa itu arsip kosong dianggap sukses). Opsi `--exclude` diprobe
+sekali karena tidak semua ROM punya.
+
+Agar tidak dobel, `backupPrivateBmgr` melewati `bmgr` kalau `run-as` tersedia,
+dan `restorePrivateBmgr` melewati citra kalau arsipnya ada. Arsip mode root
+(berawalan `<pkg>/`) dibedakan dari arsip `run-as` (isi direktori apa adanya)
+lewat entri pertama tar; kalau tertukar, restore menolak dengan pesan jelas
+alih-alih menaruh berkas di tempat yang salah.
+
+**2. Izin runtime + AppOps dipulihkan tanpa root (baru).**
+
+Mode root membaca op lewat `AppOpsManager.getOpsForPackage` (butuh
+`GET_APP_OPS_STATS`). Shell sama-sama punya hak itu lewat `cmd appops get`,
+dan sekarang hasilnya ikut tersimpan: `permissionsOf()` memetakan nama izin
+ke nama op (`AppOpsManager.permissionToOp`) lalu mencocokkannya dengan
+keluaran `cmd appops get` (format Android 9-10 `OP: allow`, Android 11+
+`OP: mode=allow`). Restore memakai `pm grant/revoke` + `appops reset/set`
+yang sudah tersedia. Kalau API tersembunyinya diblokir di ROM baru, kolom op
+dilewati dan restore hanya mengembalikan grant/revoke — tidak gagal.
+
+**3. Ukuran paket tanpa root (baru).**
+
+`StorageStatsManager` hanya butuh appop `GET_USAGE_STATS`, dan shell boleh
+memberikannya: begitu backend shell siap, aplikasi menjalankan
+`appops set <pkg> GET_USAGE_STATS allow` untuk dirinya sendiri. Setelah itu
+`queryStatsForPackage` berjalan di aplikasi dan kolom ukuran terisi seperti
+di mode root. Dua catatan: izin `PACKAGE_USAGE_STATS` dideklarasikan di
+manifest (appop ini tidak berbahaya, hanya membaca statistik), dan kegagalan
+memberikannya tidak fatal — hanya kolom ukuran yang kosong.
+
+**4. Status aktif/nonaktif paket (perbaikan wajib).**
+
+`getApplicationEnabledSetting` dulu mengembalikan `null` di mode shell,
+sehingga pemanggil yang membandingkan dengan `COMPONENT_ENABLED_STATE_ENABLED`
+menandai **semua** game sebagai nonaktif. Sekarang dibaca lewat
+`PackageManager` aplikasi, dan state `DEFAULT` diterjemahkan ke enabled/disabled
+efektif.
+
+**5. Perbaikan kecil pada pemeriksaan "data tidak berubah".**
+
+Pemeriksaan skip untuk APK/data/OBB/media dulu hanya melihat "arsipnya ada",
+sehingga arsip yang terhapus atau berukuran 0 byte masih bisa dianggap "tidak
+berubah" dan tidak dibuat ulang. Sekarang arsip harus ada **dan** berukuran
+lebih dari nol sebelum skip dipakai — inilah sebabnya backup ulang setelah
+kartu SD dibersihkan kembali menghasilkan arsip lengkap.
+
+Ringkasan paritas:
+
+| Kemampuan | Root | Shell (Shizuku/ADB) |
+|---|---|---|
+| APK, data eksternal, OBB, media | Berkas langsung | Berkas lewat shell |
+| Data privat paket debuggable | Berkas langsung | `run-as` — portabel |
+| Data privat paket lain | Berkas langsung | `bmgr` — terikat perangkat |
+| Izin runtime + AppOps | API sistem | `pm` + `cmd appops` |
+| Ukuran paket | StorageStats daemon | StorageStats + appop sendiri |
+| Status aktif/nonaktif | PMS langsung | PackageManager |
+| `ssaid` | Ditulis lewat PMS | Tidak tersedia (root-only) |
+| Keystore per-uid | Dicek | Tidak tersedia (root-only) |
+| `chown`/`chcon` | Dipakai | Tidak perlu: `bmgr`/`run-as` yang menulis |
+
 ---
 
 ## Yang belum dikerjakan
@@ -493,20 +575,23 @@ Catatan operasional:
 3. **`Target.Files`** masih ada di enum, dan `MediaEntity` masih ada di skema
    database. Menghapus entitasnya butuh migrasi dan menyentuh lebih banyak
    berkas.
-4. **Ukuran penyimpanan tampil kosong pada mode Shizuku.** Bisa diperbaiki
-   dengan meminta izin `PACKAGE_USAGE_STATS` (Usage access) ke pengguna.
+4. **`ssaid` dan keystore per-uid tetap hanya bisa dibaca mode root.**
+   `settings_ssaid.xml` (`/data/system/users/<id>/`) dan `keystore_cli_v2`
+   berada di luar jangkauan uid 2000; pada mode shell keduanya dilewati tanpa
+   menggagalkan restore (bagian 16).
 5. **`setDisplayPowerMode` menjadi no-op.** Memaksa layar mati hanya bisa
    dilakukan sistem.
-6. **Transport portabel untuk citra bmgr.** Lihat batasan di bagian 12. Ini
-   yang akan membuat data privat ikut tersalin ke kartu SD.
-7. **Belum diuji di perangkat.** Seluruh kode Shizuku terverifikasi kompilasi,
-   belum pernah dijalankan di HP sungguhan. Lima hal yang paling perlu diuji
-   lebih dulu:
-   - apakah migrasi database 7 ke 8 berjalan mulus saat aplikasi dibuka
-   - apakah `/data/local/tmp/databackup-bin` bisa dieksekusi shell
-   - apakah shell bisa menulis ke kartu SD lewat `/storage/<uuid>`
-   - apakah `bmgr` diterima untuk game dengan `allowBackup="false"`
-   - apakah `find -empty -delete` dan `ls -p` tersedia di toybox perangkat
+6. **Citra `bmgr` tetap terikat perangkat untuk paket non-debuggable.**
+   Paket debuggable sudah portabel lewat `run-as` (bagian 16); untuk yang
+   lain Transport tetap `local` dan tidak ikut tersalin ke kartu SD
+   (lihat batasan di bagian 12).
+7. **Belum diuji perangkat pada bagian baru (bagian 16).** Jalur lama sudah
+   lulus uji end-to-end (bagian 15), tetapi empat hal berikut menunggu HP:
+   - `run-as` + `/system/bin/tar` untuk paket debuggable, termasuk probe
+     `--exclude` dan pipe `set -o pipefail`;
+   - ekstraksi `run-as` setelah `pm clear` (kepemilikan berkas harus otomatis);
+   - pembacaan `cmd appops get` di MIUI 12 (format kolom mode);
+   - appop `GET_USAGE_STATS` yang diberikan shell untuk aplikasi sendiri.
 
 ---
 

@@ -114,6 +114,26 @@ object Bmgr {
         execute("bmgr", "wipe", transport, packageName)
 
     /**
+     * Apakah citra dengan [token] ada di perangkat ini.
+     *
+     * Transport `local` menyimpan citranya di penyimpanan internal perangkat,
+     * jadi citra yang dibuat di perangkat lain (atau sebelum factory reset)
+     * tidak akan ditemukan. Mengembalikan `null` kalau daftarnya tidak bisa
+     * dibaca — jangan menuduh citra hilang hanya karena penguraian gagal.
+     */
+    suspend fun hasDataSet(token: String): Boolean? =
+        parseDataSetTokens(execute("bmgr", "list", "sets").out)
+            ?.any { it.startsWith(token) }
+
+    /** Dipisah supaya bisa diuji tanpa perangkat. */
+    internal fun parseDataSetTokens(lines: List<String>): List<String>? {
+        val tokens = lines.map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .mapNotNull { Regex("""^(\d+)\s*:""").find(it)?.groupValues?.get(1) }
+        return tokens.ifEmpty { null }
+    }
+
+    /**
      * Token restore, dibaca dari `dumpsys backup`.
      *
      * Keluarannya berbentuk:

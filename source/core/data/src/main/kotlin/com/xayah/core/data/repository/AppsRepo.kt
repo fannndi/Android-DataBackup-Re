@@ -1,5 +1,7 @@
 package com.xayah.core.data.repository
 
+import android.app.AppOpsManager
+import android.app.AppOpsManagerHidden
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
@@ -50,6 +52,7 @@ import com.xayah.core.util.DateUtil
 import com.xayah.core.util.IconRelativeDir
 import com.xayah.core.util.PathUtil
 import com.xayah.core.util.command.BaseUtil
+import com.xayah.core.util.command.CmdAppops
 import com.xayah.core.util.command.PackageUtil
 import com.xayah.core.util.command.Tar
 import com.xayah.core.util.appWorkDir
@@ -504,22 +507,28 @@ class AppsRepo @Inject constructor(
      * Daftar izin runtime sebuah paket.
      *
      * `requestedPermissionsFlags` sudah menandai mana yang benar-benar
-     * diberikan, jadi tidak perlu root. Kolom `op` dan `mode` (appops)
-     * dibiarkan kosong pada mode Shizuku karena membacanya butuh hak
-     * istimewa.
+     * diberikan. Mode AppOps dibaca lewat `cmd appops get` (shell) karena API
+     * `getOpsForPackage` butuh hak istimewa yang tidak dimiliki aplikasi;
+     * dengan begitu op seperti "hanya saat dipakai" ikut dipulihkan seperti
+     * di mode root.
      */
     private suspend fun permissionsOf(info: android.content.pm.PackageInfo): List<PackagePermission> =
         if (BaseUtil.isShellMode()) {
             val requested = info.requestedPermissions ?: return emptyList()
             val grantedFlags = info.requestedPermissionsFlags ?: IntArray(0)
+            val ops = runCatching { CmdAppops.readOps(info.packageName) }.getOrDefault(emptyMap())
             requested.mapIndexedNotNull { index, name ->
                 if (name == null) {
                     null
                 } else {
+                    val opName = AppOpsManager.permissionToOp(name)?.substringAfterLast(':')?.uppercase()
+                    val mode = opName?.let { ops[it] }
                     PackagePermission(
                         name = name,
                         isGranted = (grantedFlags.getOrNull(index) ?: 0) and
                             android.content.pm.PackageInfo.REQUESTED_PERMISSION_GRANTED != 0,
+                        op = if (mode == null) AppOpsManagerHidden.OP_NONE else opCodeOf(name),
+                        mode = mode,
                     )
                 }
             }
@@ -528,17 +537,23 @@ class AppsRepo @Inject constructor(
         }
 
     /**
+     * Kode op untuk sebuah izin. Pemetaannya API tersembunyi; kalau tidak
+     * tersedia (mis. diblokir di Android baru), op dilewati dan restore hanya
+     * mengembalikan grant/revoke.
+     */
+    private fun opCodeOf(permissionName: String): Int =
+        runCatching { AppOpsManagerHidden.permissionToOpCode(permissionName) }
+            .getOrDefault(AppOpsManagerHidden.OP_NONE)
+
+    /**
      * Ukuran penyimpanan sebuah paket.
      *
-     * Butuh hak istimewa, jadi pada mode Shizuku dikembalikan kosong. Ukuran
-     * tetap terlihat dari perhitungan berkas saat backup dijalankan.
+     * Di mode root dibaca lewat daemon; di mode shell aplikasi membaca
+     * StorageStatsManager sendiri setelah shell memberinya appop
+     * `GET_USAGE_STATS` (lihat [com.xayah.core.util.command.Appops.allowUsageStats]).
      */
     private suspend fun storageStats(info: android.content.pm.PackageInfo, userHandle: UserHandle?) =
-        if (BaseUtil.isShellMode()) {
-            null
-        } else {
-            userHandle?.let { rootService.queryStatsForPackage(info, it) }
-        }
+        userHandle?.let { rootService.queryStatsForPackage(info, it) }
 
     private suspend fun getInstalledPackages(userId: Int) = installedPackages(userId).filter {
         // Filter itself

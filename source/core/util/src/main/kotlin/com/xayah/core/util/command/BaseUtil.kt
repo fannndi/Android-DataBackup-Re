@@ -108,6 +108,7 @@ object BaseUtil {
         if (ready) {
             shellMode = true
             shellBackend = ShellBackend.SHIZUKU
+            grantShellExtras(context)
         }
         return ready
     }
@@ -129,7 +130,21 @@ object BaseUtil {
         shellMode = true
         shellBackend = ShellBackend.ADB
         if (AdbShell.connect().not()) return false
-        return AdbShell.stageBinaries(context)
+        val ready = AdbShell.stageBinaries(context)
+        if (ready) grantShellExtras(context)
+        return ready
+    }
+
+    /**
+     * Izin tambahan yang hanya bisa diberikan lewat shell.
+     *
+     * `GET_USAGE_STATS` membuka `StorageStatsManager` untuk aplikasi ini,
+     * sehingga ukuran paket lain bisa ditampilkan tanpa root. Kegagalannya
+     * tidak fatal: hanya kolom ukuran yang tetap kosong.
+     */
+    private suspend fun grantShellExtras(context: Context) {
+        runCatching { Appops.allowUsageStats(context.packageName) }
+            .onFailure { log { "grantShellExtras" to "Gagal memberi GET_USAGE_STATS: ${it.message}" } }
     }
 
     private suspend fun getShellBuilder(context: Context) = Shell.Builder.create()

@@ -62,7 +62,6 @@ import com.xayah.core.ui.token.PaddingTokens
 import com.xayah.core.ui.token.SizeTokens
 import com.xayah.core.ui.util.icon
 import com.xayah.core.util.SymbolUtil
-import com.xayah.core.util.command.BaseUtil
 
 @Composable
 fun AssistChip(
@@ -494,14 +493,9 @@ fun DataChips(selections: PackageDataStates, displayStats: PackageDataStats? = n
 /**
  * Apakah jenis data ini bisa diambil pada mode eksekusi yang sedang aktif.
  *
- * `PACKAGE_USER` dan `PACKAGE_USER_DE` berada di `/data/user/<id>` dan
- * `/data/user_de/<id>`, keduanya ber-mode `0700` milik uid aplikasi sehingga
- * uid 2000 tidak bisa membacanya. Pada mode Shizuku jalurnya adalah `bmgr`,
- * bukan pembacaan berkas.
+ * Data privat (`PACKAGE_USER`/`PACKAGE_USER_DE`) di mode shell kini selalu
+ * tersedia lewat salah satu dari dua jalur: paket debuggable dibaca `run-as`
+ * (arsip portabel), sisanya ditangkap `bmgr` sebelum aplikasi di-kill. Karena
+ * itu chip-nya tidak lagi dinonaktifkan seperti saat jalur `bmgr` baru dipakai.
  */
-private fun DataType.isAvailableInCurrentMode(): Boolean =
-    if (BaseUtil.isShellMode().not()) {
-        true
-    } else {
-        this != DataType.PACKAGE_USER && this != DataType.PACKAGE_USER_DE
-    }
+private fun DataType.isAvailableInCurrentMode(): Boolean = true

@@ -133,8 +133,9 @@ internal abstract class AbstractRestoreService : AbstractPackagesService() {
                 restore(type = DataType.PACKAGE_APK, userId = userId, p = p, t = pkg, srcDir = srcDir)
                 // Data privat lewat bmgr harus dipulihkan setelah APK terpasang
                 // tetapi sebelum data eksternal, karena di dalamnya ada pm clear
-                // yang mengosongkan data aplikasi lebih dulu.
-                mPackagesRestoreUtil.restorePrivateBmgr(userId = userId, p = p)
+                // yang mengosongkan data aplikasi lebih dulu. Arsip privat
+                // `run-as` (paket debuggable) dipulihkan lewat restore(USER).
+                mPackagesRestoreUtil.restorePrivateBmgr(userId = userId, p = p, srcDir = srcDir)
                 restore(type = DataType.PACKAGE_USER, userId = userId, p = p, t = pkg, srcDir = srcDir)
                 restore(type = DataType.PACKAGE_USER_DE, userId = userId, p = p, t = pkg, srcDir = srcDir)
                 restore(type = DataType.PACKAGE_DATA, userId = userId, p = p, t = pkg, srcDir = srcDir)

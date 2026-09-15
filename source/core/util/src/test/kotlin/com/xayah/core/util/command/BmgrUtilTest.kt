@@ -91,4 +91,29 @@ class BmgrUtilTest {
     fun `isBackupSuccess menolak keluaran tanpa hasil paket`() {
         assertFalse(Bmgr.isBackupSuccess(output = "Backup finished with result: Success", packageName = "com.example.game"))
     }
+
+    // ------------------------------------------------------------------
+    // parseDataSetTokens
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `parseDataSetTokens membaca daftar set`() {
+        val output = listOf(
+            "  01 : 12345 bytes  2 backup(s)",
+            "  02 : 678 bytes  1 backup(s)",
+        )
+
+        assertEquals(listOf("01", "02"), Bmgr.parseDataSetTokens(output))
+    }
+
+    @Test
+    fun `parseDataSetTokens menerima format rapat tanpa spasi`() {
+        assertEquals(listOf("12"), Bmgr.parseDataSetTokens(listOf("12: 0 bytes")))
+    }
+
+    @Test
+    fun `parseDataSetTokens mengembalikan null bila tidak ada baris set`() {
+        assertNull(Bmgr.parseDataSetTokens(emptyList()))
+        assertNull(Bmgr.parseDataSetTokens(listOf("Backup Manager is enabled", "no sets")))
+    }
 }

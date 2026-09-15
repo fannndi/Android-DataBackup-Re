@@ -24,6 +24,7 @@ import com.xayah.core.util.command.Appops
 import com.xayah.core.util.command.Bmgr
 import com.xayah.core.util.command.BaseUtil
 import com.xayah.core.util.command.Pm
+import com.xayah.core.util.command.RunAs
 import com.xayah.core.util.command.SELinux
 import com.xayah.core.util.command.Tar
 import com.xayah.core.util.model.ShellResult
@@ -263,10 +264,54 @@ class PackagesRestoreUtil @Inject constructor(
         if (p.getDataSelected(dataType).not()) {
             t.updateInfo(dataType = dataType, state = OperationState.SKIP)
         } else if (BaseUtil.isShellMode() && (dataType == DataType.PACKAGE_USER || dataType == DataType.PACKAGE_USER_DE)) {
-            // Di mode shell arsip data privat memang tidak pernah dibuat
-            // (ditangani `bmgr`), jadi ketiadaannya bukan kegagalan.
-            out.add(log { "Private data is restored via bmgr, skip tar." })
-            t.updateInfo(dataType = dataType, state = OperationState.SKIP, log = out.toLineString())
+            // Data privat di mode shell ada dua bentuk: arsip `run-as` yang
+            // portabel (berkas biasa) dan citra `bmgr` yang dipulihkan di
+            // restorePrivateBmgr sebelum data eksternal. Arsip `run-as`
+            // dipulihkan di sini karena isinya berkas, bukan citra buram.
+            val runAsReady = RunAs.isDebuggable(p.packageInfo.flags) && RunAs.isAvailable(packageName)
+            if (runAsReady && rootService.exists(src)) {
+                when (RunAs.classifyEntry(packageName, RunAs.firstEntry(src, ct.decompressPara))) {
+                    RunAs.ArchiveLayout.RUN_AS -> {
+                        isSuccess = true
+                        t.updateInfo(dataType = dataType, state = OperationState.PROCESSING, bytes = rootService.calculateSize(src))
+
+                        // `pm clear` menggantikan opsi --recursive-unlink:
+                        // tar sistem tidak punya opsi itu, dan mengosongkan
+                        // direktori aplikasi lebih tuntas daripada menimpa.
+                        if (dataType == DataType.PACKAGE_USER && context.readCleanRestoring().first()) {
+                            Pm.clear(userId = userId, packageName = packageName).also { result ->
+                                if (result.isSuccess.not()) out.add(log { "pm clear gagal untuk $packageName." })
+                            }
+                        }
+
+                        RunAs.decompress(
+                            packageName = packageName,
+                            src = src,
+                            dst = if (dataType == DataType.PACKAGE_USER) "/data/data/$packageName" else dst,
+                            extra = ct.decompressPara,
+                        ).also { result ->
+                            isSuccess = result.isSuccess
+                            out.addAll(result.out)
+                        }
+                        t.updateInfo(dataType = dataType, state = if (isSuccess) OperationState.DONE else OperationState.ERROR, log = out.toLineString())
+                    }
+
+                    RunAs.ArchiveLayout.ROOT -> {
+                        isSuccess = false
+                        out.add(log { "Arsip privat dibuat mode root; pulihkan lewat mode root." })
+                        t.updateInfo(dataType = dataType, state = OperationState.ERROR, log = out.toLineString())
+                    }
+
+                    RunAs.ArchiveLayout.UNKNOWN -> {
+                        isSuccess = false
+                        out.add(log { "Arsip privat tidak terbaca: $src" })
+                        t.updateInfo(dataType = dataType, state = OperationState.ERROR, log = out.toLineString())
+                    }
+                }
+            } else {
+                out.add(log { "Private data is restored via bmgr, skip tar." })
+                t.updateInfo(dataType = dataType, state = OperationState.SKIP, log = out.toLineString())
+            }
         } else {
             if (uid == -1) {
                 isSuccess = false
@@ -440,18 +485,36 @@ class PackagesRestoreUtil @Inject constructor(
      * kepemilikan yang benar tanpa perlu `chown`.
      *
      * Dilewati kalau tidak ada token bmgr — misalnya pada backup mode root,
-     * atau game yang memakai `allowBackup="false"` sehingga tidak menghasilkan
-     * citra.
+     * pada paket debuggable yang arsip privatnya dibuat `run-as`, atau game
+     * yang memakai `allowBackup="false"` sehingga tidak menghasilkan citra.
      */
-    suspend fun restorePrivateBmgr(userId: Int, p: PackageEntity) = run {
+    suspend fun restorePrivateBmgr(userId: Int, p: PackageEntity, srcDir: String) = run {
         val token = p.extraInfo.bmgrToken
         if (BaseUtil.isShellMode().not() || token.isEmpty()) return@run
 
         val packageName = p.packageName
+
+        // Arsip run-as (kalau ada) dipulihkan restoreData; jangan dobel.
+        val userArchive = packageRepository.getArchiveDst(
+            dstDir = srcDir,
+            dataType = DataType.PACKAGE_USER,
+            ct = p.indexInfo.compressionType,
+        )
+        if (rootService.exists(userArchive)) {
+            log { "Arsip privat run-as tersedia, bmgr dilewati." }
+            return@run
+        }
+
         log { "Restoring private data via bmgr..." }
 
         // Sama seperti saat backup: pastikan BackupManager aktif.
         if (Bmgr.isEnabled().not()) Bmgr.setEnabled(true)
+
+        // Citra transport `local` terikat perangkat: beri tahu kalau tokennya
+        // tidak ada di sini, karena pesan bmgr sendiri membingungkan.
+        if (Bmgr.hasDataSet(token) == false) {
+            log { "Peringatan: citra $token tidak ada di transport lokal perangkat ini (dibuat di perangkat lain?)." }
+        }
 
         // Kosongkan data lama supaya hasil restore tidak bercampur.
         Pm.clear(userId = userId, packageName = packageName).also { result ->

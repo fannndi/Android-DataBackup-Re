@@ -24,6 +24,7 @@ import com.xayah.core.util.PathUtil
 import com.xayah.core.util.SymbolUtil
 import com.xayah.core.util.command.Bmgr
 import com.xayah.core.util.command.BaseUtil
+import com.xayah.core.util.command.RunAs
 import com.xayah.core.util.command.Tar
 import com.xayah.core.util.appWorkDir
 import com.xayah.core.util.filesDir
@@ -240,12 +241,12 @@ class PackagesBackupUtil @Inject constructor(
             if (srcDir.isNotEmpty()) {
                 val sizeBytes = rootService.calculateSize(srcDir)
                 t.updateInfo(dataType = dataType, state = OperationState.PROCESSING, bytes = sizeBytes)
-                if (rootService.exists(dst) && sizeBytes == r?.getDataBytes(dataType)) {
-                    isSuccess = true
-                    t.updateInfo(dataType = dataType, state = OperationState.SKIP)
-                    out.add(log { "Data has not changed." })
-                } else {
-                    Tar.compressInCur(cur = srcDir, src = "./*.apk", dst = dst, extra = ct.getCompressPara(context.readCompressionLevel().first()))
+            if (rootService.exists(dst) && rootService.calculateSize(dst) > 0 && sizeBytes == r?.getDataBytes(dataType)) {
+                isSuccess = true
+                t.updateInfo(dataType = dataType, state = OperationState.SKIP)
+                out.add(log { "Data has not changed." })
+            } else {
+                Tar.compressInCur(cur = srcDir, src = "./*.apk", dst = dst, extra = ct.getCompressPara(context.readCompressionLevel().first()))
                         .also { result ->
                             isSuccess = result.isSuccess
                             out.addAll(result.out)
@@ -287,11 +288,53 @@ class PackagesBackupUtil @Inject constructor(
             isSuccess = true
             t.updateInfo(dataType = dataType, state = OperationState.SKIP)
         } else if (BaseUtil.isShellMode() && (dataType == DataType.PACKAGE_USER || dataType == DataType.PACKAGE_USER_DE)) {
-            // Data privat tidak bisa dibaca uid 2000. Jalurnya `bmgr`, jadi
-            // jangan pernah menandai keduanya gagal di sini.
-            isSuccess = true
-            out.add(log { "Private data is backed up via bmgr, skip tar." })
-            t.updateInfo(dataType = dataType, state = OperationState.SKIP, log = out.toLineString())
+            // Data privat tidak bisa dibaca uid 2000. Paket debuggable dibaca
+            // sendiri lewat `run-as` (arsipnya portabel); sisanya ditangkap
+            // `bmgr` sebelum app di-kill, jadi tar di sini tidak perlu.
+            if (RunAs.isDebuggable(p.packageInfo.flags) && RunAs.isAvailable(packageName)) {
+                val cur = if (dataType == DataType.PACKAGE_USER) {
+                    "/data/data/$packageName"
+                } else {
+                    "/data/user_de/$userId/$packageName"
+                }
+                if (dataType == DataType.PACKAGE_USER_DE && RunAs.hasDirectory(packageName, cur).not()) {
+                    isSuccess = true
+                    out.add(log { "Not exist and skip: $cur" })
+                    t.updateInfo(dataType = dataType, state = OperationState.SKIP, log = out.toLineString())
+                    return@run ShellResult(code = -2, input = listOf(), out = out)
+                }
+
+                val sizeBytes = RunAs.calculateSize(packageName, cur)
+                t.updateInfo(dataType = dataType, state = OperationState.PROCESSING, bytes = sizeBytes)
+                if (rootService.exists(dst) && rootService.calculateSize(dst) > 0 && sizeBytes > 0 && sizeBytes == r?.getDataBytes(dataType)) {
+                    isSuccess = true
+                    t.updateInfo(dataType = dataType, state = OperationState.SKIP)
+                    out.add(log { "Data has not changed." })
+                } else {
+                    RunAs.compress(
+                        packageName = packageName,
+                        cur = cur,
+                        dst = dst,
+                        extra = ct.getCompressPara(context.readCompressionLevel().first()),
+                    ).also { result ->
+                        isSuccess = result.isSuccess
+                        out.addAll(result.out)
+                    }
+                    commonBackupUtil.testArchive(src = dst, ct = ct).also { result ->
+                        isSuccess = isSuccess && result.isSuccess
+                        out.addAll(result.out)
+                        if (result.isSuccess) {
+                            p.setDataBytes(dataType, sizeBytes)
+                            p.setDisplayBytes(dataType, rootService.calculateSize(dst))
+                        }
+                    }
+                }
+                t.updateInfo(dataType = dataType, state = if (isSuccess) OperationState.DONE else OperationState.ERROR, log = out.toLineString())
+            } else {
+                isSuccess = true
+                out.add(log { "Private data is backed up via bmgr, skip tar." })
+                t.updateInfo(dataType = dataType, state = OperationState.SKIP, log = out.toLineString())
+            }
         } else {
             // Check the existence of origin path.
             val src = packageRepository.getDataSrc(srcDir, packageName)
@@ -333,7 +376,7 @@ class PackagesBackupUtil @Inject constructor(
 
             val sizeBytes = rootService.calculateSize(src)
             t.updateInfo(dataType = dataType, state = OperationState.PROCESSING, bytes = sizeBytes)
-            if (rootService.exists(dst) && sizeBytes == r?.getDataBytes(dataType)) {
+            if (rootService.exists(dst) && rootService.calculateSize(dst) > 0 && sizeBytes == r?.getDataBytes(dataType)) {
                 isSuccess = true
                 t.updateInfo(dataType = dataType, state = OperationState.SKIP)
                 out.add(log { "Data has not changed." })
@@ -406,8 +449,12 @@ class PackagesBackupUtil @Inject constructor(
      * Token hasilnya disimpan di konfigurasi backup supaya saat restore kita
      * tahu citra mana yang harus dipulihkan.
      *
-     * Hanya berjalan pada mode Shizuku. Pada mode root data privat ditangkap
-     * langsung sebagai berkas, jadi jalur ini dilewati.
+     * Hanya berjalan pada mode shell (Shizuku/ADB). Pada mode root data privat
+     * ditangkap langsung sebagai berkas, jadi jalur ini dilewati.
+     *
+     * Paket debuggable juga melewatinya: data privatnya dibaca lewat `run-as`
+     * di [backupData] sehingga arsipnya portabel dan tidak bergantung citra
+     * transport lokal.
      *
      * Catatan penting: transport `local` menyimpan citranya di direktori privat
      * aplikasi `com.android.localtransport`, yang tidak bisa dibaca shell.
@@ -416,6 +463,12 @@ class PackagesBackupUtil @Inject constructor(
      */
     suspend fun backupPrivateBmgr(p: PackageEntity) = run {
         if (BaseUtil.isShellMode().not()) return@run
+
+        if (RunAs.isDebuggable(p.packageInfo.flags) && RunAs.isAvailable(p.packageName)) {
+            p.extraInfo.bmgrToken = ""
+            log { "Private data dibaca lewat run-as, bmgr dilewati." }
+            return@run
+        }
 
         log { "Backing up private data via bmgr..." }
         val packageName = p.packageName

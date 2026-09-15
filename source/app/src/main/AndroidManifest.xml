@@ -2,6 +2,17 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!--
+        PACKAGE_USAGE_STATS adalah izin bertipe appop: pengguna bisa
+        memberikannya lewat Settings, dan pada mode shell (Shizuku/ADB)
+        aplikasi memberikannya sendiri lewat `appops set`. Dipakai untuk
+        membaca ukuran paket lewat StorageStatsManager supaya daftar game
+        menampilkan ukuran seperti di mode root.
+    -->
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+
     <application
         android:name=".DataBackupApplication"
         android:allowBackup="true"
