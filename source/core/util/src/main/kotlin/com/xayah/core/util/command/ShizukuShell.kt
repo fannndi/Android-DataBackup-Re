@@ -45,10 +45,20 @@ object ShizukuShell {
     private const val TAG = "ShizukuShell"
 
     /**
-     * Batas waktu bawaan yang longgar: kompresi backup game bisa berjalan
-     * beberapa menit, jauh lebih lama dari perintah biasa.
+     * Batas waktu bawaan.
+     *
+     * Satu perintah `tar | zstd` untuk backup game besar bisa berjalan sangat
+     * lama: 11 GB dibaca dari penyimpanan internal lalu ditulis ke kartu SD.
+     * Pada kartu kelas 10 (sekitar 10 MB/detik) itu saja sudah lebih dari 18
+     * menit, sehingga batas 10 menit sebelumnya akan membuang pekerjaan yang
+     * sebenarnya sedang berjalan normal.
+     *
+     * Perlu diketahui: saat batas waktu terlampaui, kita hanya berhenti
+     * menunggu — proses di sisi shell bisa saja terus berjalan. Karena itu
+     * membiarkan pekerjaan sah selesai lebih baik daripada memutusnya lebih
+     * awal. Nilai <= 0 berarti tanpa batas.
      */
-    private const val DEFAULT_TIMEOUT_SECONDS = 600L
+    private const val DEFAULT_TIMEOUT_SECONDS = 3600L
 
     /** Kode permintaan izin Shizuku. Bebas, asal konsisten. */
     const val PERMISSION_REQUEST_CODE = 0x5A17

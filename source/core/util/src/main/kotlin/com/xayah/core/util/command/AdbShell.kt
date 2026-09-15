@@ -140,10 +140,20 @@ object AdbShell {
     private const val TAG = "AdbShell"
 
     /**
-     * Batas waktu bawaan yang longgar: kompresi backup game bisa berjalan
-     * beberapa menit. Nilai <= 0 berarti tanpa batas waktu.
+     * Batas waktu bawaan.
+     *
+     * Satu perintah `tar | zstd` untuk backup game besar bisa berjalan sangat
+     * lama: 11 GB dibaca dari penyimpanan internal lalu ditulis ke kartu SD.
+     * Pada kartu kelas 10 (sekitar 10 MB/detik) itu saja sudah lebih dari 18
+     * menit, sehingga batas 10 menit sebelumnya akan membuang pekerjaan yang
+     * sebenarnya sedang berjalan normal.
+     *
+     * Saat batas waktu terlampaui kita hanya berhenti menunggu; perintah di
+     * sisi perangkat bisa terus berjalan. Karena itu membiarkan pekerjaan sah
+     * selesai lebih baik daripada memutusnya lebih awal. Nilai <= 0 berarti
+     * tanpa batas.
      */
-    private const val DEFAULT_TIMEOUT_SECONDS = 600L
+    private const val DEFAULT_TIMEOUT_SECONDS = 3600L
 
     private const val CONNECT_TIMEOUT_MILLIS = 5_000L
     private const val DISCOVERY_TIMEOUT_MILLIS = 15_000L
