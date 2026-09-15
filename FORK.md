@@ -698,6 +698,17 @@ menandai SKIP. Urutannya:
 
 Kartu SD: 12 GB → 10 GB tersisa.
 
+**Verifikasi isi arsip (tanpa menyentuh game):** arsip dibaca ulang dan
+dibandingkan dengan berkas aslinya. Hasilnya **byte-exact**:
+
+| Berkas | Di dalam arsip | Asli di perangkat |
+|---|---|---|
+| `main.93007.com.YoStarEN.AzurLane.obb` | 1554751765 | 1554751765 |
+| `base.apk` | 70309676 | 70309676 |
+
+Nama berkas OBB di arsip juga persis sama, sehingga restore akan menaruhnya di
+tempat yang benar. Arsip APK berisi `./base.apk`.
+
 **Temuan penting — bmgr ditolak untuk Azur Lane:**
 
 ```
