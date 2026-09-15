@@ -659,6 +659,13 @@ Sebelum perbaikan, skenario yang sama menghasilkan arsip 92 byte berisi hanya
    kartu, atau pakai penyimpanan lain. Perlu diingat juga aset game umumnya
    sudah terkompresi, sehingga `zstd` akan lambat dengan rasio kecil — dan
    timeout shell 600 detik per perintah berisiko untuk 12 GB.
+9. **Area sentuh kotak centang di daftar belum stabil (perlu diperiksa).**
+   Saat menguji di perangkat, tap pada kotak centang baris pertama dan kedua
+   bekerja, tetapi tap pada baris ketiga berulang kali justru membuka layar
+   Details. Tinggi baris daftar juga terukur tidak seragam (95 px vs 56 px di
+   tangkapan layar 480 px). Dugaan awal: area sentuh `Checkbox` di dalam
+   `Surface(onClick)` tidak selalu menang atas klik barisnya. Belum
+   dipastikan penyebabnya.
 
 ---
 
