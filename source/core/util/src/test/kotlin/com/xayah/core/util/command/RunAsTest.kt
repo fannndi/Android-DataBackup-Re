@@ -1,7 +1,6 @@
 package com.xayah.core.util.command
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -15,8 +14,8 @@ import org.junit.Test
  *
  *  1. [RunAs.classifyEntry] — membedakan arsip buatan mode root (berawalan
  *     nama paket) dari arsip `run-as` (isi direktori apa adanya);
- *  2. [RunAs.supportsExclude] — apakah tar sistem mendukung `--exclude`
- *     sehingga cache tidak ikut tersimpan.
+ *  2. [RunAs.excludeArgs] — daftar `--exclude` supaya cache tidak ikut
+ *     tersimpan (dukungan opsinya diuji langsung di perangkat).
  */
 class RunAsTest {
     @Test
@@ -45,14 +44,12 @@ class RunAsTest {
     }
 
     @Test
-    fun `supportsExclude membaca keluaran help`() {
-        val toybox = """
-            usage: tar [-cxt] [-fhjmvO] [-C DIR] [-T FILE] [-X FILE] [--exclude PATTERN] ...
-        """.trimIndent()
-        val busybox = "BusyBox v1.34.1 (tar) multi-call binary."
-        assertTrue(RunAs.supportsExclude(toybox))
-        assertFalse(RunAs.supportsExclude(busybox))
-        assertFalse(RunAs.supportsExclude(""))
+    fun `excludeArgs menutup folder yang tidak perlu`() {
+        val args = RunAs.excludeArgs()
+        assertTrue(args.all { it.startsWith("--exclude=") })
+        assertTrue(args.any { it.contains("./cache") })
+        assertTrue(args.any { it.contains("./code_cache") })
+        assertTrue(args.any { it.contains("./no_backup") })
     }
 
     @Test

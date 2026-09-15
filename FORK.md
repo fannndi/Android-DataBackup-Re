@@ -557,6 +557,30 @@ Ringkasan paritas:
 | Keystore per-uid | Dicek | Tidak tersedia (root-only) |
 | `chown`/`chcon` | Dipakai | Tidak perlu: `bmgr`/`run-as` yang menulis |
 
+**Hasil uji perangkat (POCO X3 NFC, MIUI 12 / Android 10).** Semua jalur di
+atas dijalankan sungguhan lewat UI, memakai dummy game yang bisa diperiksa
+sampai isi berkasnya:
+
+- `run-as` backup: log mencatat `run-as "com.databackup.testgame"
+  /system/bin/tar --exclude=... | zstd ... > user.tar.zst`; isi `user.tar.zst`
+  persis `shared_prefs/account.xml`, `databases/game.db`, `files/*` — cache dan
+  `no_backup` tidak ikut. `bmgrToken` di konfigurasi backup berisi `""`.
+- `run-as` restore: setelah `pm clear` + hapus data eksternal, restore
+  menghasilkan akun yang sama (`player_4198` + token), `game.db`, aset
+  eksternal, OBB 4 MB + 1 MB, dan video 512 KB; hasil tugas
+  "1 apps restored, 6/6". Ekstraksi berjalan lewat
+  `zstd -d -c user.tar.zst | run-as ... tar -xpf - -C /data/data/<pkg>`.
+- AppOps: dengan `appops set com.databackup.testgame CAMERA ignore`, baris
+  paket di database berisi `CAMERA isGranted=false op=26 mode=1` — mode dan
+  kode op terbaca benar (izin storage tidak muncul karena op-nya sudah usang
+  di Android 10, dan itu memang dibiarkan kosong).
+- Ukuran paket: `storageStats` terisi (app 5,3 MB / data 2,7 MB) setelah appop
+  `GET_USAGE_STATS` diberikan otomatis oleh shell; sebelumnya selalu 0.
+- Dua catatan lapangan: toybox MIUI 12 **mendukung** `--exclude` walau tidak
+  tercantum di `tar --help` (karena itu probnya fungsional, bukan membaca
+  teks bantuan), dan `cmd appops get` di MIUI menulis `OP: mode` tanpa
+  indentasi plus entri `MIUIOP(...)` yang harus diabaikan pengurai.
+
 ---
 
 ## Yang belum dikerjakan
@@ -585,13 +609,11 @@ Ringkasan paritas:
    Paket debuggable sudah portabel lewat `run-as` (bagian 16); untuk yang
    lain Transport tetap `local` dan tidak ikut tersalin ke kartu SD
    (lihat batasan di bagian 12).
-7. **Belum diuji perangkat pada bagian baru (bagian 16).** Jalur lama sudah
-   lulus uji end-to-end (bagian 15), tetapi empat hal berikut menunggu HP:
-   - `run-as` + `/system/bin/tar` untuk paket debuggable, termasuk probe
-     `--exclude` dan pipe `set -o pipefail`;
-   - ekstraksi `run-as` setelah `pm clear` (kepemilikan berkas harus otomatis);
-   - pembacaan `cmd appops get` di MIUI 12 (format kolom mode);
-   - appop `GET_USAGE_STATS` yang diberikan shell untuk aplikasi sendiri.
+7. **Bagian baru (bagian 16) sudah diuji perangkat** untuk `run-as` backup &
+   restore, AppOps, ukuran paket, dan status aktif — rinciannya di akhir
+   bagian 16. Yang belum: alur Wireless debugging (Android 11+), Shizuku
+   sungguhan, dan pemulihan izin/appops lewat tombol restore izin (perintah
+   `pm grant/revoke` + `appops set`-nya sudah terbukti jalan di jalur lain).
 
 ---
 

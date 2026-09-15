@@ -50,10 +50,7 @@ object RunAs {
     private val EXCLUDED_FOLDERS = listOf(".ota", "cache", "code_cache", "lib", "no_backup")
 
     @Volatile
-    private var excludeProbed = false
-
-    @Volatile
-    private var excludeSupported = false
+    private var excludeProbed: Boolean? = null
 
     private val availability = ConcurrentHashMap<String, Boolean>()
 
@@ -123,8 +120,8 @@ object RunAs {
      */
     suspend fun compress(packageName: String, cur: String, dst: String, extra: String): ShellResult {
         val parts = mutableListOf("run-as", quote(packageName), SYSTEM_TAR)
-        if (systemTarSupportsExclude()) {
-            EXCLUDED_FOLDERS.forEach { parts.add("--exclude=${quote("./$it")}") }
+        if (systemTarSupportsExclude(packageName)) {
+            parts.addAll(excludeArgs())
         }
         parts.addAll(listOf("-cpf", "-", "-C", quote(cur), "."))
 
@@ -169,17 +166,36 @@ object RunAs {
         else -> ArchiveLayout.RUN_AS
     }
 
-    /** Dipisah supaya bisa diuji tanpa perangkat. */
-    internal fun supportsExclude(helpText: String): Boolean = helpText.contains("--exclude")
+    /** Argumen `--exclude` untuk folder yang tidak pernah masuk arsip. */
+    internal fun excludeArgs(): List<String> =
+        EXCLUDED_FOLDERS.map { "--exclude=${quote("./$it")}" }
 
-    private suspend fun systemTarSupportsExclude(): Boolean {
-        if (excludeProbed) return excludeSupported
-        val help = BaseUtil.execute(SYSTEM_TAR, "--help", STDERR_NULL, log = false).outString
-        excludeSupported = supportsExclude(help)
-        // Gagal membaca help dianggap tidak didukung; arsip tetap benar,
-        // hanya berukuran lebih besar karena cache ikut masuk.
-        excludeProbed = true
-        return excludeSupported
+    /**
+     * Apakah tar sistem menerima `--exclude`.
+     *
+     * Probnya **fungsional**, bukan membaca `--help`: toybox di MIUI 12
+     * mendukung `--exclude` tetapi tidak mencantumkannya di teks bantuan
+     * (hanya memuat opsi huruf), sehingga pengecekan teks memberi jawaban
+     * salah. Sumber probnya berkas sistem kecil supaya ongkosnya nol.
+     */
+    private suspend fun systemTarSupportsExclude(packageName: String): Boolean {
+        excludeProbed?.let { return it }
+        val result = BaseUtil.execute(
+            "run-as",
+            quote(packageName),
+            SYSTEM_TAR,
+            "--exclude=${quote("./probe")}",
+            "-cpf",
+            "/dev/null",
+            "-C",
+            "/system/bin",
+            "./sh",
+            STDERR_NULL,
+            log = false,
+        )
+        val supported = result.isSuccess
+        excludeProbed = supported
+        return supported
     }
 
     private fun quote(s: String): String = "$QUOTE$s$QUOTE"
