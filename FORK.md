@@ -730,6 +730,55 @@ lambat.
 
 ---
 
+### 20. Perbandingan mode: root, Shizuku, dan ADB
+
+Diukur langsung di perangkat uji (POCO X3 NFC, Android 10), bukan dari teori.
+
+| Kemampuan | Root (libsu) | Shizuku | ADB mandiri |
+|---|---|---|---|
+| Perintah dijalankan sebagai | uid 0 | uid 2000 (shell) | uid 2000 (shell) |
+| Butuh persiapan | root saja | app Shizuku + server | pairing / `adb tcpip` |
+| Setelah HP di-restart | langsung siap | server harus di-start ulang | `adb tcpip 5555` diulang |
+| APK, OBB, `Android/data` | bisa | bisa | bisa |
+| Data privat `/data/data` | baca langsung | `run-as` / `bmgr` | `run-as` / `bmgr` |
+| SSAID | bisa | tidak | tidak |
+| Kunci keystore | bisa | tidak | tidak |
+| `chown` / `chcon` | bisa | tidak | tidak |
+| Jalur mentah `/data/media` | bisa | harus lewat `/storage` | harus lewat `/storage` |
+| `pm`, `am`, `appops`, `settings`, `bmgr` | bisa | bisa | bisa |
+
+**Bukti probe di perangkat** (semua dijalankan sebagai shell/uid 2000):
+
+```
+ls /data/data/com.YoStarEN.AzurLane        -> Permission denied
+run-as com.YoStarEN.AzurLane id            -> package not debuggable
+run-as com.databackup.testgame id          -> uid=10281(u0_a281) context=u:r:runas_app:s0
+ls /data/system/users/0/settings_ssaid.xml -> Permission denied
+ls /data/media/0/                          -> Permission denied
+ls /storage/emulated/0/Android/data/<pkg>  -> berhasil (jalur FUSE)
+chown 10270:10270 /data/local/tmp          -> Operation not permitted
+pm list packages -3 / am force-stop / appops get /
+settings get / bmgr enabled / ime list     -> semuanya berhasil
+```
+
+**Kesimpulan praktis.** Shizuku dan ADB identik kemampuannya — keduanya
+uid 2000. Yang membedakan hanya cara menyiapkannya. Root lebih tinggi di lima
+hal, dan kelimanya adalah hal yang memang hanya bisa dilakukan uid 0.
+
+**Bagaimana aplikasi memilih backend** saat dibuka:
+
+1. Coba Shizuku kalau izinnya masih tersimpan
+2. Kalau gagal, coba ADB kalau kuncinya masih ada
+3. Ulangi sampai 6 kali dengan jeda 500 ms, karena binder Shizuku datang
+   asinkron
+4. Kalau keduanya gagal, perintah jatuh ke uid aplikasi dan hampir semua
+   operasi gagal
+
+Langkah 2 adalah perbaikan andal yang ditemukan di sesi ini: sebelumnya
+kegagalan Shizuku langsung mengakhiri proses, sehingga ADB tidak pernah dicoba.
+
+---
+
 ## Yang belum dikerjakan
 
 1. **`core/network`** (SMB/SFTP/FTP/WebDAV) masih ada. Modul itu juga berisi
