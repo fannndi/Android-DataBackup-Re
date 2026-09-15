@@ -757,13 +757,23 @@ lambat.
    online ini tidak fatal karena progres ada di server, tetapi untuk game
    offline yang menolak backup, data privatnya memang tidak bisa diselamatkan
    tanpa root.
-9. **Area sentuh kotak centang di daftar belum stabil (perlu diperiksa).**
-   Saat menguji di perangkat, tap pada kotak centang baris pertama dan kedua
-   bekerja, tetapi tap pada baris ketiga berulang kali justru membuka layar
-   Details. Tinggi baris daftar juga terukur tidak seragam (95 px vs 56 px di
-   tangkapan layar 480 px). Dugaan awal: area sentuh `Checkbox` di dalam
-   `Surface(onClick)` tidak selalu menang atas klik barisnya. Belum
-   dipastikan penyebabnya.
+9. **Catatan uji: kotak centang TIDAK bermasalah.** Sempat diduga area sentuhnya
+   tidak stabil, ternyata itu keliru — penyebabnya daftar **tersusun ulang**
+   antar-tap (item terpilih naik ke atas), sehingga koordinat dari tangkapan
+   layar lama mengenai baris yang salah.
+
+   Hierarki UI membuktikan kotak centangnya sehat: `android.widget.CheckBox`
+   berukuran 132x132 px (48dp), `clickable=true`, `checkable=true`, dan tinggi
+   baris seragam 220 px. Tap di titik pusatnya selalu bekerja.
+
+   Cara mengukur yang benar — jangan menebak dari tangkapan layar:
+   ```
+   adb shell uiautomator dump /data/local/tmp/ui.xml
+   adb pull /data/local/tmp/ui.xml
+   ```
+   Lalu baca atribut `bounds`. Untuk daftar ini pusatnya:
+   baris 1 `(971, 711)`, baris 2 `(971, 931)`, baris 3 `(971, 1151)` — dan
+   **ukur ulang setiap kali daftar berubah susunan**.
 
 ---
 
